@@ -335,6 +335,13 @@ test("rules.txt: the new row follows the CDF sheet header", () => {
     K: "AI.INSTALLATION", L: "AI.CODE", M: "AI.DWG_REV", N: "AI.AUTHOR", O: "AI.ADVISER" });
   assert.strictEqual(r.newRow.sheet.name, "CDF"); assert.strictEqual(r.newRow.match.col, "B");
 });
+test("the older project format (cdf, nrc, jc, dwgver, title, summary ...) is read too", () => {
+  const r = E.parseAiPaste('[{"cdf":"A330-1-973","status":"Open","open":"-","nrc":"C1039","cs":"1","jc":"330-25-23-JC855-001-SM","dwg":"330-25-23-JC855","dwgver":"A","title":"INSTL - X","summary":"TEXT","initiator":"Name","notes":"check X"}]');
+  const it = r.items[0];
+  assert.deepStrictEqual([it.cdf_number, it.code, it.drawing_number, it.drawing_rev, it.installation, it.description, it.author, it.form_date],
+    ["A330-1-973", "C1039", "330-25-23-JC855-001-SM", "A", "INSTL - X", "TEXT", "Name", ""]);
+  assert.deepStrictEqual(it.flags, ["check X", "Not used (not in the add-in's format): status, cs"]);
+});
 test("prompt_version is kept from the reply", () => {
   const r = E.parseAiPaste('[{"cdf_number":"A330-1-1","prompt_version":"ABC123"},{"cdf_number":"A330-1-2"}]');
   assert.strictEqual(r.items[0].prompt_version, "ABC123");

@@ -721,6 +721,10 @@
     drawing: "drawing_number", main: "main_file", att: "att_file", attachment: "att_file", owner: "author",
     initiator: "author", adviser: "technical_adviser", technical_advisor: "technical_adviser",
     dwg_rev: "drawing_rev", drawing_revision: "drawing_rev",
+    // the keys of the older "CDF New Rows" project format
+    nrc: "code", jc: "drawing_number", dwgver: "drawing_rev", dwg_ver: "drawing_rev", title: "installation",
+    summary: "description", open: "form_date", open_date: "form_date", advisor: "technical_adviser",
+    notes: "flags", note: "flags",
     version: "prompt_version", promptversion: "prompt_version"
   };
 
@@ -761,16 +765,19 @@
     var items = [];
     list.forEach(function (raw) {
       if (!raw || typeof raw !== "object") return;
-      var it = { flags: [] };
+      var it = { flags: [] }, unused = [];
       Object.keys(raw).forEach(function (k) {
         var key = k.trim().toLowerCase().replace(/[\s-]+/g, "_");
         key = PASTE_ALIASES[key] || key;
         if (key === "flags") {
-          it.flags = Array.isArray(raw[k]) ? raw[k].map(String).filter(Boolean) : (raw[k] ? [String(raw[k])] : []);
+          it.flags = it.flags.concat(Array.isArray(raw[k]) ? raw[k].map(String).filter(Boolean) : (raw[k] ? [String(raw[k])] : []));
         } else if (PASTE_KEYS.indexOf(key) >= 0 || key === "prompt_version") {
-          it[key] = raw[k] == null ? "" : String(raw[k]).trim();
-        }
+          var val = raw[k] == null ? "" : String(raw[k]).trim();
+          if (key === "form_date" && val === "-") val = "";
+          if (!it[key]) it[key] = val;
+        } else if (!/^dwg$/.test(key)) unused.push(k);
       });
+      if (unused.length) it.flags.push("Not used (not in the add-in's format): " + unused.join(", "));
       if (it.prompt_version == null) it.prompt_version = "";
       PASTE_KEYS.forEach(function (k) { if (it[k] == null) it[k] = ""; });
       if (it.cdf_number || it.main_file || it.description) items.push(it);
