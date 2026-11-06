@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   CDF Updater - Excel add-in manifest
-  לפני ההתקנה: החלף את NPerryK בשם המשתמש שלך ב-GitHub (Ctrl+H בפנקס רשימות).
-  אם קראת למאגר בשם אחר מ-cdf-updater, החלף גם אותו.
+  Hosted on GitHub Pages: https://nperryk.github.io/cdf-updater/
+  If the repository gets another name than cdf-updater, change it here as well.
 -->
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -10,16 +10,16 @@
            xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
            xsi:type="TaskPaneApp">
   <Id>443ba6b7-7628-4682-963a-5f8f2b7daeee</Id>
-  <Version>1.0.0.0</Version>
+  <Version>1.1.0.0</Version>
   <ProviderName>Niv Perry</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="CDF Updater"/>
-  <Description DefaultValue="ייבוא גיליונות והרצת כללי עדכון CDF מקובץ טקסט"/>
-  <IconUrl DefaultValue="https://NPerryK.github.io/cdf-updater/assets/icon-32.png"/>
-  <HighResolutionIconUrl DefaultValue="https://NPerryK.github.io/cdf-updater/assets/icon-64.png"/>
-  <SupportUrl DefaultValue="https://NPerryK.github.io/cdf-updater/"/>
+  <Description DefaultValue="Import update sheets and run the CDF update rules from a text file"/>
+  <IconUrl DefaultValue="https://nperryk.github.io/cdf-updater/assets/icon-32.png"/>
+  <HighResolutionIconUrl DefaultValue="https://nperryk.github.io/cdf-updater/assets/icon-64.png"/>
+  <SupportUrl DefaultValue="https://nperryk.github.io/cdf-updater/"/>
   <AppDomains>
-    <AppDomain>https://NPerryK.github.io</AppDomain>
+    <AppDomain>https://nperryk.github.io</AppDomain>
   </AppDomains>
   <Hosts>
     <Host Name="Workbook"/>
@@ -30,7 +30,7 @@
     </Sets>
   </Requirements>
   <DefaultSettings>
-    <SourceLocation DefaultValue="https://NPerryK.github.io/cdf-updater/taskpane.html"/>
+    <SourceLocation DefaultValue="https://nperryk.github.io/cdf-updater/taskpane.html"/>
   </DefaultSettings>
   <Permissions>ReadWriteDocument</Permissions>
 
@@ -78,24 +78,24 @@
     </Hosts>
     <Resources>
       <bt:Images>
-        <bt:Image id="Icon.16x16" DefaultValue="https://NPerryK.github.io/cdf-updater/assets/icon-16.png"/>
-        <bt:Image id="Icon.32x32" DefaultValue="https://NPerryK.github.io/cdf-updater/assets/icon-32.png"/>
-        <bt:Image id="Icon.80x80" DefaultValue="https://NPerryK.github.io/cdf-updater/assets/icon-80.png"/>
+        <bt:Image id="Icon.16x16" DefaultValue="https://nperryk.github.io/cdf-updater/assets/icon-16.png"/>
+        <bt:Image id="Icon.32x32" DefaultValue="https://nperryk.github.io/cdf-updater/assets/icon-32.png"/>
+        <bt:Image id="Icon.80x80" DefaultValue="https://nperryk.github.io/cdf-updater/assets/icon-80.png"/>
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="https://NPerryK.github.io/cdf-updater/"/>
-        <bt:Url id="Commands.Url" DefaultValue="https://NPerryK.github.io/cdf-updater/commands.html"/>
-        <bt:Url id="Taskpane.Url" DefaultValue="https://NPerryK.github.io/cdf-updater/taskpane.html"/>
+        <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="https://nperryk.github.io/cdf-updater/"/>
+        <bt:Url id="Commands.Url" DefaultValue="https://nperryk.github.io/cdf-updater/commands.html"/>
+        <bt:Url id="Taskpane.Url" DefaultValue="https://nperryk.github.io/cdf-updater/taskpane.html"/>
       </bt:Urls>
       <bt:ShortStrings>
-        <bt:String id="GetStarted.Title" DefaultValue="CDF Updater מוכן"/>
+        <bt:String id="GetStarted.Title" DefaultValue="CDF Updater is ready"/>
         <bt:String id="Tab.Label" DefaultValue="CDF"/>
-        <bt:String id="Group.Label" DefaultValue="עדכון CDF"/>
-        <bt:String id="Button.Label" DefaultValue="פתח עדכון"/>
+        <bt:String id="Group.Label" DefaultValue="CDF Update"/>
+        <bt:String id="Button.Label" DefaultValue="Open Updater"/>
       </bt:ShortStrings>
       <bt:LongStrings>
-        <bt:String id="GetStarted.Description" DefaultValue="פתח את הלשונית CDF ולחץ על 'פתח עדכון'."/>
-        <bt:String id="Button.Tooltip" DefaultValue="ייבוא קבצי העדכון והרצת האלגוריתם מקובץ הכללים"/>
+        <bt:String id="GetStarted.Description" DefaultValue="Open the CDF tab and click 'Open Updater'."/>
+        <bt:String id="Button.Tooltip" DefaultValue="Import the update files and run the algorithm from the rules file"/>
       </bt:LongStrings>
     </Resources>
   </VersionOverrides>

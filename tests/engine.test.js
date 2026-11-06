@@ -20,7 +20,8 @@ function row(obj, width = 30) {
 }
 
 const rules = E.parseRules(fs.readFileSync(path.join(__dirname, "..", "rules.txt"), "utf8"));
-const algo = rules.algorithms[0];
+const generic = E.parseRules(fs.readFileSync(path.join(__dirname, "generic-rules.txt"), "utf8"));
+const algo = generic.algorithms[0];
 const NOW = new Date(2026, 10, 5, 14, 30, 0); // 05/11/2026
 const TODAY = E.dateToSerial(NOW, false);
 
@@ -30,10 +31,11 @@ test("rules.txt parses with no errors", () => {
 });
 test("imports", () => {
   assert.strictEqual(rules.imports.length, 2);
-  assert.deepStrictEqual(rules.imports.map((i) => [i.slot, i.target, i.from]), [[1, "INTEGRATOR", null], [2, "SHEET2", null]]);
+  assert.deepStrictEqual(rules.imports.map((i) => [i.slot, i.target, i.file, i.from]), [[1, "GCC", "CDF_List_Export", null], [2, "Mantra", "650", null]]);
 });
 test("algorithm settings", () => {
-  assert.strictEqual(rules.algorithms.length, 1);
+  assert.strictEqual(generic.algorithms.length, 1);
+  assert.strictEqual(rules.algorithms.length, 0, "rules.txt uses CDF_ALGORITHM");
   assert.strictEqual(algo.baseFirst, true);
   assert.strictEqual(algo.update, "INTEGRATOR");
   assert.strictEqual(algo.baseStartRow, 3);
@@ -57,6 +59,29 @@ test("no-space arrow and NOT CONTAINS / AND / SET text", () => {
   assert.deepStrictEqual(r.errors, []);
   assert.strictEqual(r.algorithms[0].actions[0].conds.length, 2);
   assert.strictEqual(r.algorithms[0].match.update.col, "A");
+});
+
+test("IMPORT options: FILE/FROM in any order, errors", () => {
+  const r = E.parseRules('IMPORT 1 "A" FROM "Data" FILE "X_Y"\nIMPORT 2 "B" FILE ""\nIMPORT 3 "C" FOO "x"');
+  assert.deepStrictEqual([r.imports[0].file, r.imports[0].from], ["X_Y", "Data"]);
+  assert.deepStrictEqual(r.errors.map((e) => e.line), [2, 3]);
+});
+test("file names route to the right import slot", () => {
+  const imp = rules.imports;
+  assert.strictEqual(E.matchImportSlot(imp, "CDF_List_Export.xlsx"), 1);
+  assert.strictEqual(E.matchImportSlot(imp, "cdf list export (3).xlsx"), 1);
+  assert.strictEqual(E.matchImportSlot(imp, "650.xlsx"), 2);
+  assert.strictEqual(E.matchImportSlot(imp, "Report_650_Nov.xlsx"), 2);
+  assert.strictEqual(E.matchImportSlot(imp, "CDF_List_Export_2026-06-50.xlsx"), 1, "longest name wins over a stray 650");
+  assert.strictEqual(E.matchImportSlot(imp, "something else.xlsx"), null);
+  assert.ok(E.importFileMatches("CDF_List_Export", "CDF-List-Export.xlsm"));
+  assert.ok(!E.importFileMatches("650", "INTEGRATOR EXCEL.xlsx"));
+});
+test("all parser messages are English", () => {
+  const r = E.parseRules('FOO\nIMPORT 1 "A" BAR\nMATCH UPDATE.A = UPDATE.B\nCOPY UPDATE.A => BASE.B\nNEWROW C = AI.NOPE\nREPORT "x"\nIF BASE.A ?? "1" COPY UPDATE.A -> BASE.B');
+  r.errors.forEach((e) => assert.ok(!/[\u0590-\u05FF]/.test(e.message), e.message));
+  assert.ok(r.errors.length >= 7);
+  assert.strictEqual(E.describeAction(algo.actions[1]), 'If BASE.T = "9 - FINAL APPROVAL" — Copy UPDATE.N → BASE.X');
 });
 
 console.log("algorithm (CDF scenario)");
@@ -159,7 +184,7 @@ console.log("new CDF row");
 test("rules.txt NEWROW block parsed", () => {
   const nr = rules.newRow;
   assert.strictEqual(nr.key.col, "C");
-  assert.strictEqual(nr.startRow, 3, "defaults to BASE_START_ROW");
+  assert.strictEqual(nr.startRow, 2);
   assert.strictEqual(nr.cells.length, 12);
   assert.deepStrictEqual(nr.cells.find((c) => c.col === "H").source, { kind: "ai", field: "DESCRIPTION", key: "description" });
   assert.deepStrictEqual(nr.cells.find((c) => c.col === "A").source, { kind: "link", which: "ATT", prefix: "" });
@@ -233,9 +258,9 @@ test("single object, smart quotes, trailing comma, alias keys", () => {
 });
 test("clear errors for empty / non-JSON / broken / unrelated JSON", () => {
   assert.ok(E.parseAiPaste("").error);
-  assert.ok(/לא נמצא JSON/.test(E.parseAiPaste("A330-1-961  ROUTINE  DESCRIPTION").error));
-  assert.ok(/לא תקין/.test(E.parseAiPaste('[{"cdf_number": "A330-1-9}]').error));
-  assert.ok(/לא נמצאו שורות/.test(E.parseAiPaste('[{"foo": 1}]').error));
+  assert.ok(/No JSON found/.test(E.parseAiPaste("A330-1-961  ROUTINE  DESCRIPTION").error));
+  assert.ok(/not valid/.test(E.parseAiPaste('[{"cdf_number": "A330-1-9}]').error));
+  assert.ok(/No CDF rows/.test(E.parseAiPaste('[{"foo": 1}]').error));
 });
 test("pasted item -> row cells use the file names for CDF and links", () => {
   const it = E.parseAiPaste('[{"main_file":"A330-1-961.-.pdf","att_file":"A330-1-961.-ATT.pdf","cdf_number":"A330-1-961.-","priority":"ROUTINE"}]').items[0];
@@ -248,7 +273,9 @@ test("pasted item -> row cells use the file names for CDF and links", () => {
 console.log("email + reports");
 test("REPORT and EMAIL_GROUP parse", () => {
   assert.strictEqual(rules.reports.length, 2);
-  assert.deepStrictEqual(rules.reports[0].columns.map((c) => c.col), ["C", "T", "X"]);
+  assert.deepStrictEqual(generic.reports[0].columns.map((c) => c.col), ["C", "T", "X"]);
+  assert.deepStrictEqual(rules.reports[0].columns.map((c) => c.col), ["C", "S", "T"]);
+  assert.strictEqual(rules.reports[0].conds.length, 3);
   const r = E.parseRules('EMAIL_GROUP "team" "a@x.com; b@y.org"\nEMAIL_GROUP "bad" "nope"\nREPORT "x" WHERE UPDATE.A = "1" COLUMNS C\nREPORT "y" SHEET "S" FROM_ROW 5 WHERE BASE.T CONTAINS "FINAL" AND BASE.X <> EMPTY COLUMNS C,T');
   assert.deepStrictEqual(r.errors.map((e) => e.line), [2, 3]);
   assert.deepStrictEqual(r.emailGroups[0].addresses, ["a@x.com", "b@y.org"]);
@@ -256,7 +283,7 @@ test("REPORT and EMAIL_GROUP parse", () => {
   assert.strictEqual(r.reports[0].conds.length, 2);
 });
 test("runReport filters rows", () => {
-  const out = E.runReport(rules.reports[0], base.values);
+  const out = E.runReport(generic.reports[0], base.values);
   assert.deepStrictEqual(out.rows.map((r) => r.row), [5]);
   assert.deepStrictEqual(out.rows[0].cells, ["A330-1-003", "9 - FINAL APPROVAL", "Dana"]);
 });
@@ -274,6 +301,14 @@ test("lastRunFromLog picks the latest run and today's new rows", () => {
   const run = E.lastRunFromLog(log, "05/11/2026");
   assert.strictEqual(run.stamp, "05/11/2026 10:00");
   assert.deepStrictEqual(run.changes.map((c) => [c.key, c.col, c.newValue]), [["A330-1-001", "T", "3"]]);
+  assert.deepStrictEqual(run.notFound.map((c) => c.key), ["A330-1-999"]);
+  assert.deepStrictEqual(run.newRows.map((c) => c.key), ["A330-1-961"]);
+});
+test("log written by the old Hebrew version is still read", () => {
+  const log = [["hdr"],
+    ["05/11/2026 10:00", "a", "U", "7", "A330-1-999", "", "", "", "\u05DC\u05D0 \u05E0\u05DE\u05E6\u05D0 \u05D1\u05D2\u05D9\u05DC\u05D9\u05D5\u05DF \u05D4\u05D1\u05E1\u05D9\u05E1"],
+    ["05/11/2026 11:00", "x", "S", "9", "A330-1-961", "C", "", "A330-1-961", "\u05E9\u05D5\u05E8\u05D4 \u05D7\u05D3\u05E9\u05D4"]];
+  const run = E.lastRunFromLog(log, "05/11/2026");
   assert.deepStrictEqual(run.notFound.map((c) => c.key), ["A330-1-999"]);
   assert.deepStrictEqual(run.newRows.map((c) => c.key), ["A330-1-961"]);
 });

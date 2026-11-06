@@ -1,76 +1,91 @@
 # ==================================================================
-#   כללי העדכון של התוסף CDF Updater
-#   התוסף קורא את הקובץ הזה מחדש בכל לחיצה על "בדיקה" או "הרץ".
-#   כדי לשנות את האלגוריתם - ערוך את הקובץ ב-GitHub ושמור (Commit).
+#   CDF Updater - update rules
+#   The add-in re-reads this file every time you click "Check changes".
+#   To change the algorithm, edit this file on GitHub and Commit.
 #
-#   שורה שמתחילה ב-# היא הערה. שמות גיליונות וערכי טקסט - בתוך "מירכאות".
-#   עמודות כותבים באותיות: A, T, AA ...
-#   BASE  = גיליון הבסיס (הקובץ הגדול שמתעדכן)
-#   UPDATE = גיליון העדכון (הנתונים שנכנסו מהקובץ החיצוני)
+#   Lines starting with # are comments. Sheet names and text values go in "quotes".
+#   Columns are written as letters: A, T, AA ...
+#   BASE   = the base sheet (the big workbook being updated)
+#   UPDATE = the update sheet (the data imported from the outside file)
 # ==================================================================
 
 
-# ---------------- שלב 1: ייבוא קבצים ----------------
-# IMPORT <מספר> "<שם הגיליון בקובץ הגדול>"   [FROM "<שם הגיליון בקובץ הנכנס>"]
-# הגיליון בקובץ הגדול נמחק ומוחלף כולו בגיליון מהקובץ הנכנס (באותו מיקום).
-# בלי FROM - נלקח הגיליון הראשון של הקובץ הנכנס.
-# אם הגיליון לא קיים בקובץ הגדול - הוא ייווצר בסוף.
+# ---------------- Step 1: import files ----------------
+# IMPORT <number> "<sheet in this workbook>"  [FILE "<file name>"]  [FROM "<sheet in the imported file>"]
+# The sheet in this workbook is deleted and fully replaced by the imported sheet (same position).
+# FILE  - the file that belongs in this slot. Files dropped anywhere in step 1 go to the slot whose
+#         name they contain (case, spaces and _ are ignored), and a different file gets a warning.
+# FROM  - which sheet to take from the imported file. Without FROM, its first sheet is used.
+# If the sheet doesn't exist in this workbook yet, it is created at the end.
 
-IMPORT 1 "INTEGRATOR"
-IMPORT 2 "SHEET2"            # <- שנה לשם הגיליון האמיתי של הקובץ השני
-
-
-# ---------------- שלב 2: האלגוריתם ----------------
-ALGORITHM "עדכון סטטוס CDF מ-INTEGRATOR"
-
-BASE FIRST                   # FIRST = הגיליון הראשון בחוברת. אפשר גם: BASE "שם הגיליון"
-UPDATE "INTEGRATOR"
-
-BASE_START_ROW 3             # שורת הנתונים הראשונה בגיליון הבסיס (מתחת לכותרות)
-UPDATE_START_ROW 2           # שורת הנתונים הראשונה בגיליון העדכון
-
-# השוואה: עמודה A בעדכון מול עמודה C בבסיס (בלי רגישות לרווחים ולאותיות גדולות/קטנות)
-MATCH UPDATE.A = BASE.C
-
-# האם לדלג על תא ריק בקובץ העדכון (YES = לא לדרוס ערך קיים בריק)
-SKIP_EMPTY NO
-
-DATE_FORMAT "dd/mm/yyyy"
-
-# 1. העתקת הסטטוס
-COPY UPDATE.M -> BASE.T
-
-# 2+3. אם הסטטוס החדש הוא FINAL APPROVAL - העתקת השם ועמודות Q,R
-IF BASE.T = "9 - FINAL APPROVAL" COPY UPDATE.N -> BASE.X
-IF BASE.T = "9 - FINAL APPROVAL" COPY UPDATE.Q -> BASE.AA
-IF BASE.T = "9 - FINAL APPROVAL" COPY UPDATE.R -> BASE.AB
-
-# 4. אם משהו בשורה השתנה בפועל - תאריך היום בעמודה R
-ON_CHANGE SET BASE.R = TODAY
+IMPORT 1 "GCC"     FILE "CDF_List_Export"
+IMPORT 2 "Mantra"  FILE "650"
 
 
-# ---------------- שורה חדשה לחריג (מזוג PDF) ----------------
-# Claude ממלא את השדות מתוך PDF החריג ו-PDF ה-ATT (דרך claude.ai, העתק-הדבק),
-# ואתה עובר על הטופס ומאשר. אם ה-CDF כבר קיים בעמודת המפתח - השורה שלו מתעדכנת,
-# אחרת נוספת שורה חדשה אחרי השורה האחרונה.
+# ---------------- Step 2: the CDF algorithm ----------------
+# Step 2 runs the CDF algorithm (CDF_Algorithm_2026-11-05), which is implemented in code (cdf-algo.js),
+# in stages. The pane shows which stages are done and cross-checks every result before writing.
+# The version below is the algorithm text this workbook follows. If it differs from the version in the
+# code, the pane warns that the code needs an update.
+CDF_ALGORITHM "2026-11-05"
+
+# --- Settings the algorithm uses. Change them here when the algorithm text changes them. ---
+
+# 10: Final Approval signed by this person -> GCC!AM = Released
+FINAL_APPROVAL_RELEASE "Igor Golodriga"
+
+# 20.3: explicit station mapping, GCC!AM -> CDF!S  (a station missing here is reported, not guessed;
+#       "... Completed" always becomes Released - rule 20.3.1)
+STATION "Initiator"               = "1 - Initiator"
+STATION "POC ENG"                 = "2 - POC"
+STATION "POC"                     = "2 - POC"
+STATION "Conversion ENG"          = "3 - Conversion Engineer"
+STATION "Conversion Engineer"     = "3 - Conversion Engineer"
+STATION "AVIONICS"                = "4 - AVIONICS"
+STATION "Final Approval"          = "9 - Final Approval"
+STATION "Production Engineering"  = "10 - Production Engineering"
+STATION "Production Planning"     = "11 - Production Planning"
+STATION "Released"                = "Released"
+
+# 20.3.2 / 100.3: duplicate CDF kept in CDF, not in GCC, excluded from the CDF STATUS count
+DUPLICATE_CDF "A330-1-052 (another)"
+
+# 100.5.1 / 100.5.2: pending tables (Open, station 9, signature with this full name)
+PENDING_TABLE "MOR PENDING TABLE"  "Mor Ifrah"
+PENDING_TABLE "IGOR PENDING TABLE" "Igor Golodriga"
+
+# 100.8: WHERE ARE THE CDFS - CDF!P (SEND TO) -> supplier shown (in this order)
+SUPPLIER "ANN/SIE" = "ANN/SIE"
+SUPPLIER "SIE/ANN" = "ANN/SIE"
+SUPPLIER "ANN"     = "ANN/SIE"
+SUPPLIER "ANCRA"   = "ANCARA"
+SUPPLIER "ANCARA"  = "ANCARA"
+SUPPLIER "TIMAT"   = "TIMAT"
+SUPPLIER "IAI"     = "IAI"
+
+
+# ---------------- New CDF row (from a PDF pair) ----------------
+# Claude fills the fields from the CDF PDF and the ATT PDF (via claude.ai, copy-paste),
+# and you review the form and approve. If the CDF already exists in the key column, its row
+# is updated; otherwise a new row is added after the last one.
 #
-# מקורות אפשריים לכל עמודה:
-#   CDF            מספר ה-CDF (משם הקובץ, נבדק מול הטופס)
-#   TODAY / NOW    תאריך היום / תאריך ושעה
-#   "טקסט"         ערך קבוע
-#   AI.<שדה>       DATE  PRIORITY  DESCRIPTION  OEM  DRAWING  INSTALLATION  CODE  INITIATOR
-#   LINK MAIN "<תיקייה>"   קישור ל-PDF החריג (התיקייה + שם הקובץ)
-#   LINK ATT  "<תיקייה>"   קישור ל-PDF ה-ATT
+# Possible sources for each column:
+#   CDF              the CDF number (from the file name, checked against the form)
+#   TODAY / NOW      today's date / date and time
+#   "text"           a fixed value
+#   AI.<FIELD>       DATE  PRIORITY  DESCRIPTION  OEM  DRAWING  INSTALLATION  CODE  INITIATOR
+#   LINK MAIN "<folder>"   link to the CDF PDF (folder + file name)
+#   LINK ATT  "<folder>"   link to the ATT PDF
 #
-# !!! לאמת את אותיות העמודות מול שורת הכותרות בקובץ !!!
-# הסדר כאן לפי מבנה השורות מ-26/10. החלונית מציגה ליד כל שדה את שם הכותרת
-# של העמודה שהוא נכתב אליה - אם זה לא מתאים, תקן כאן.
+# Column letters follow the CDF column map of the algorithm (00.1). The pane also shows, next to
+# every field, the header of the column it will be written to.
 
 NEWROW_SHEET FIRST
 NEWROW_KEY C
 NEWROW_HEADER_ROW 1
+NEWROW_START_ROW 2
 
-NEWROW A = LINK ATT ""        # <- שים בין המירכאות את התיקייה של קבצי ה-PDF
+NEWROW A = LINK ATT ""        # <- put the folder of the PDF files between the quotes
 NEWROW B = LINK MAIN ""
 NEWROW C = CDF
 NEWROW F = TODAY
@@ -83,21 +98,22 @@ NEWROW L = AI.CODE
 NEWROW M = "-"
 NEWROW O = AI.INITIATOR
 
-# ההנחיה ל-Claude נמצאת בקובץ ai-prompt.txt - אפשר לערוך.
+# The instructions Claude gets are in ai-prompt.txt - you can edit them.
 
 
-# ---------------- מייל ----------------
-# דוחות שאפשר לשלוח במייל, בנוסף ל"שינויים מההרצה האחרונה" ו"שורות חדשות היום".
-# REPORT "<נושא המייל>" WHERE <תנאי> [AND <תנאי>] COLUMNS <עמודות>
-REPORT "CDFs in FINAL APPROVAL" WHERE BASE.T = "9 - FINAL APPROVAL" COLUMNS C, T, X
-REPORT "Open CDFs - CONV. ENG." WHERE BASE.T = "3 - CONV. ENG." COLUMNS C, T, R
+# ---------------- Email ----------------
+# Reports you can send by email, in addition to "Changes from the last run" and "New rows added today".
+# REPORT "<email subject>" WHERE <condition> [AND <condition>] COLUMNS <columns>
+# (BASE.C <> EMPTY keeps one row per CDF - the anchor row, not its solution rows)
+REPORT "Open CDFs at Final Approval" WHERE BASE.C <> EMPTY AND BASE.R = "Open" AND BASE.S = "9 - Final Approval" COLUMNS C, S, T
+REPORT "Open CDFs at Conversion Engineer" WHERE BASE.C <> EMPTY AND BASE.R = "Open" AND BASE.S = "3 - Conversion Engineer" COLUMNS C, S, P
 
-# קבוצות נמענים. שים לב: אם המאגר ב-GitHub ציבורי, כל אחד יכול לקרוא את הקובץ הזה -
-# עדיף לשמור קבוצות בחלונית עצמה (נשמרות רק במחשב שלך).
-# EMAIL_GROUP "צוות" "name1@company.com; name2@company.com"
+# Recipient groups. Note: the GitHub repository is public, so anyone can read this file -
+# better to save groups in the pane itself (they stay on your computer only).
+# EMAIL_GROUP "Team" "name1@company.com; name2@company.com"
 
 
-# ---------------- יומן שינויים ----------------
-# כל הרצה מוסיפה לגיליון הזה את כל השינויים (ערך ישן -> חדש) ו-CDF שלא נמצאו.
-# LOG NONE = בלי יומן.
+# ---------------- Change log ----------------
+# Every run adds all changes (old -> new value) and the CDFs that were not found to this sheet.
+# LOG NONE = no log.
 LOG "UPDATE LOG"

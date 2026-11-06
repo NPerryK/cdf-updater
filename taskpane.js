@@ -32,11 +32,11 @@
   function start(info) {
     state.inExcel = !!(info && window.Office && info.host === Office.HostType.Excel);
     if (!state.inExcel) {
-      showBanner("התוסף פתוח מחוץ לאקסל: אפשר לבדוק את קובץ הכללים, אבל פעולות על החוברת זמינות רק בתוך Excel.", false);
+      showBanner("Opened outside Excel: you can check the rules file, but workbook actions only work inside Excel.", false);
     } else {
       state.canImport = Office.context.requirements.isSetSupported("ExcelApi", "1.13");
       if (!state.canImport) {
-        showBanner("גרסת ה-Excel הזו לא תומכת בהחלפת גיליון מקובץ (נדרש Microsoft 365). הרצת האלגוריתם עדיין עובדת.", true);
+        showBanner("This Excel version can't replace a sheet from a file (Microsoft 365 required). Running the algorithm still works.", true);
       }
     }
     try { localStorage.removeItem("cdfUpdater.apiKey.v1"); localStorage.removeItem("cdfUpdater.aiMode.v1"); } catch (e) { /* ignore */ }
@@ -91,16 +91,16 @@
   }
 
   function loadRules() {
-    setPill("טוען כללים…", "");
+    setPill("Loading rules…", "");
     var p = state.source === "local"
       ? Promise.resolve(state.rulesText)
       : fetch("rules.txt?v=" + Date.now(), { cache: "no-store" }).then(function (r) {
-          if (!r.ok) throw new Error("לא הצלחתי לקרוא את rules.txt (HTTP " + r.status + ")");
+          if (!r.ok) throw new Error("Couldn't read rules.txt (HTTP " + r.status + ")");
           return r.text();
         });
     return p.then(applyRulesText).catch(function (e) {
       state.rules = null;
-      setPill("אין כללים", "bad");
+      setPill("No rules", "bad");
       $("rulesErrors").innerHTML = '<div class="err">' + esc(e.message) + "</div>";
       renderSlots(); renderAlgos(); renderExtras(); refreshButtons();
     });
@@ -113,7 +113,7 @@
     state.lastPreview = null;
     $("results").innerHTML = "";
     var errs = state.rules.errors.length;
-    setPill(errs ? errs + " שגיאות בכללים" : "כללים תקינים", errs ? "bad" : "ok");
+    setPill(errs ? errs + (errs > 1 ? " rule errors" : " rule error") : "Rules OK", errs ? "bad" : "ok");
     renderRules(); renderSlots(); renderAlgos(); renderExtras(); refreshButtons();
   }
 
@@ -131,31 +131,32 @@
 
   function renderRules() {
     var src = state.source === "local"
-      ? "קובץ מקומי: <b dir=\"ltr\">" + esc(state.localName || "") + "</b> (נשמר במחשב הזה עד שתחזור לקובץ מ-GitHub)."
-      : "<b dir=\"ltr\">rules.txt</b> מתוך GitHub — נקרא מחדש בכל לחיצה על \"בדוק שינויים\".";
-    if (state.loadedAt) src += " נטען ב-" + hhmm(state.loadedAt) + ".";
+      ? "Local file: <b>" + esc(state.localName || "") + "</b> (kept on this computer until you switch back to GitHub)."
+      : "<b>rules.txt</b> from GitHub — reloaded every time you click \"Check changes\".";
+    if (state.loadedAt) src += " Loaded at " + hhmm(state.loadedAt) + ".";
     $("rulesSource").innerHTML = src;
     $("useGithub").classList.toggle("hidden", state.source !== "local");
     $("rulesText").textContent = state.rulesText;
     var r = state.rules;
     $("rulesErrors").innerHTML = r && r.errors.length
       ? r.errors.map(function (e) {
-          return '<div class="err">שורה ' + e.line + ": " + esc(e.message) + (e.text ? '<br><code>' + esc(e.text) + "</code>" : "") + "</div>";
+          return '<div class="err">Line ' + e.line + ": " + esc(e.message) + (e.text ? '<br><code>' + esc(e.text) + "</code>" : "") + "</div>";
         }).join("")
       : "";
   }
 
   function renderAlgos() {
     var r = state.rules;
-    if (!r || !r.algorithms.length) { $("algos").innerHTML = '<p class="hint">לא הוגדר אלגוריתם בקובץ הכללים.</p>'; return; }
+    if (r && r.cdfAlgorithm) { $("algos").innerHTML = cdfAlgoCard(r); return; }
+    if (!r || !r.algorithms.length) { $("algos").innerHTML = '<p class="hint">No algorithm is defined in the rules file.</p>'; return; }
     $("algos").innerHTML = r.algorithms.map(function (a) {
       var steps = a.actions.map(function (x) { return "<li>" + esc(E.describeAction(x)) + "</li>"; }).join("");
-      var oc = a.onChange.map(function (x) { return '<li class="onchange">אם השורה השתנתה — ' + esc(E.describeAction(x)) + "</li>"; }).join("");
+      var oc = a.onChange.map(function (x) { return '<li class="onchange">If the row changed — ' + esc(E.describeAction(x)) + "</li>"; }).join("");
       return '<div class="algo">' +
         '<div class="algo-name">' + esc(a.name) + "</div>" +
-        '<div class="algo-meta">בסיס: <b>' + (a.baseFirst ? "הגיליון הראשון" : esc(a.base)) + "</b> · עדכון: <b>" + esc(a.update || "?") + "</b><br>" +
-        (a.match ? "התאמה: <b dir=\"ltr\">UPDATE." + a.match.update.col + " = BASE." + a.match.base.col + "</b> · " : "") +
-        "נתונים משורה " + a.baseStartRow + " / " + a.updateStartRow + "</div>" +
+        '<div class="algo-meta">Base: <b>' + (a.baseFirst ? "first sheet" : esc(a.base)) + "</b> · Update: <b>" + esc(a.update || "?") + "</b><br>" +
+        (a.match ? "Match: <b>UPDATE." + a.match.update.col + " = BASE." + a.match.base.col + "</b> · " : "") +
+        "Data from row " + a.baseStartRow + " / " + a.updateStartRow + "</div>" +
         "<ol>" + steps + oc + "</ol></div>";
     }).join("");
   }
@@ -167,7 +168,7 @@
     imports.forEach(function (s) { valid[s.slot] = true; });
     Object.keys(state.files).forEach(function (k) { if (!valid[k]) delete state.files[k]; });
 
-    if (!imports.length) { $("slots").innerHTML = '<p class="hint">אין שורות IMPORT בקובץ הכללים.</p>'; return; }
+    if (!imports.length) { $("slots").innerHTML = '<p class="hint">No IMPORT lines in the rules file.</p>'; return; }
 
     $("slots").innerHTML = "";
     imports.forEach(function (s) {
@@ -175,31 +176,61 @@
       var el = document.createElement("label");
       el.className = "slot" + (f ? " has-file" : "") + (st && !f ? " " + st.kind : "");
       el.innerHTML =
-        '<div class="slot-title"><span>קובץ ' + s.slot + "</span>" +
-        (f ? '<button type="button" class="slot-clear" title="הסר">✕</button>' : "") + "</div>" +
-        '<div class="slot-target">→ גיליון <b>' + esc(s.target) + "</b>" + (s.from ? " (מתוך \"" + esc(s.from) + "\")" : "") + "</div>" +
-        '<div class="slot-file">' + (f ? esc(f.name) + " · " + kb(f.size) : "לחץ לבחירה או גרור קובץ לכאן (xlsx / xlsm / csv)") + "</div>" +
+        '<div class="slot-title"><span>File ' + s.slot + (s.file ? ' · <span class="slot-expect">' + esc(s.file) + "</span>" : "") + "</span>" +
+        (f ? '<button type="button" class="slot-clear" title="Remove">✕</button>' : "") + "</div>" +
+        '<div class="slot-target">→ sheet <b>' + esc(s.target) + "</b>" + (s.from ? " (from \"" + esc(s.from) + "\")" : "") + "</div>" +
+        '<div class="slot-file">' + (f ? esc(f.name) + " · " + kb(f.size) : "Click to choose, or drop the file here (xlsx / xlsm / csv)") + "</div>" +
+        (f && s.file && !E.importFileMatches(s.file, f.name) ? '<div class="slot-warn">Expected a file named ' + esc(s.file) + "</div>" : "") +
         (st && !f ? '<div class="slot-msg">' + esc(st.msg) + "</div>" : "") +
-        '<input type="file" accept=".xlsx,.xlsm,.csv" hidden>';
+        '<input type="file" accept=".xlsx,.xlsm,.csv" multiple hidden>';
       var input = el.querySelector("input");
-      input.addEventListener("change", function () { if (input.files[0]) setFile(s.slot, input.files[0]); });
+      input.addEventListener("change", function () { takeImportFiles(input.files, s.slot); input.value = ""; });
       var clr = el.querySelector(".slot-clear");
       if (clr) clr.addEventListener("click", function (ev) { ev.preventDefault(); ev.stopPropagation(); delete state.files[s.slot]; renderSlots(); refreshButtons(); });
       el.addEventListener("dragover", function (ev) { ev.preventDefault(); el.classList.add("drag"); });
       el.addEventListener("dragleave", function () { el.classList.remove("drag"); });
       el.addEventListener("drop", function (ev) {
         ev.preventDefault(); el.classList.remove("drag");
-        if (ev.dataTransfer.files[0]) setFile(s.slot, ev.dataTransfer.files[0]);
+        takeImportFiles(ev.dataTransfer.files, s.slot);
       });
       $("slots").appendChild(el);
     });
   }
 
-  function setFile(slot, file) {
-    state.files[slot] = file;
-    delete state.slotStatus[slot];
+  // Files go to the slot whose FILE name they match, wherever they are dropped.
+  // A file that matches no slot goes to the slot it was dropped on (or the next empty one).
+  function takeImportFiles(list, droppedOn) {
+    var files = Array.prototype.slice.call(list || []);
+    if (!files.length) return;
+    var imports = state.rules ? state.rules.imports : [];
+    var unmatched = [];
+    files.forEach(function (f) {
+      var slot = E.matchImportSlot(imports, f.name);
+      if (slot != null) setSlotFile(slot, f); else unmatched.push(f);
+    });
+    unmatched.forEach(function (f, i) {
+      var target = droppedOn;
+      if (i > 0 || (files.length > 1 && state.files[droppedOn] && files.indexOf(state.files[droppedOn]) >= 0)) {
+        var free = imports.filter(function (s) { return !state.files[s.slot]; })[0];
+        if (free) target = free.slot;
+      }
+      setSlotFile(target, f);
+    });
     $("importConfirm").classList.add("hidden");
     renderSlots(); refreshButtons();
+  }
+
+  function setSlotFile(slot, file) {
+    state.files[slot] = file;
+    delete state.slotStatus[slot];
+  }
+
+  function mismatchWarnings(slots) {
+    var w = slots.filter(function (s) { return s.file && !E.importFileMatches(s.file, state.files[s.slot].name); });
+    if (!w.length) return "";
+    return '<br><span class="warn-text">⚠ ' + w.map(function (s) {
+      return "File " + s.slot + " is “" + esc(state.files[s.slot].name) + "” — expected a file named " + esc(s.file) + ".";
+    }).join("<br>⚠ ") + "</span>";
   }
 
   function chosenSlots() {
@@ -213,9 +244,9 @@
       var replace = slots.filter(function (s) { return existing.indexOf(s.target) >= 0; }).map(function (s) { return s.target; });
       var create = slots.filter(function (s) { return existing.indexOf(s.target) < 0; }).map(function (s) { return s.target; });
       var html = "";
-      if (replace.length) html += "הגיליונות <b>" + replace.map(esc).join(", ") + "</b> יימחקו ויוחלפו בתוכן הקבצים. נוסחאות בגיליונות אחרים שמפנות אליהם יהפכו ל-#REF!.";
-      if (create.length) html += (html ? "<br>" : "") + "ייווצרו גיליונות חדשים: <b>" + create.map(esc).join(", ") + "</b>.";
-      $("importConfirmText").innerHTML = html + "<br>להמשיך?";
+      if (replace.length) html += "Sheet" + (replace.length > 1 ? "s" : "") + " <b>" + replace.map(esc).join(", ") + "</b> will be deleted and replaced with the file contents. Formulas on other sheets that point to " + (replace.length > 1 ? "them" : "it") + " will turn into #REF!.";
+      if (create.length) html += (html ? "<br>" : "") + "New sheet" + (create.length > 1 ? "s" : "") + " will be created: <b>" + create.map(esc).join(", ") + "</b>.";
+      $("importConfirmText").innerHTML = html + mismatchWarnings(slots) + "<br>Continue?";
       $("importConfirm").classList.remove("hidden");
       $("importBtn").disabled = true;
     }).catch(showError);
@@ -229,10 +260,10 @@
     slots.forEach(function (s) {
       chain = chain.then(function () {
         var f = state.files[s.slot];
-        setStatus("מחליף את הגיליון " + s.target + "…");
+        setStatus("Replacing sheet " + s.target + "…");
         return importOne(s, f).then(function (info) {
           delete state.files[s.slot];
-          state.slotStatus[s.slot] = { kind: "done", msg: "הוחלף ✓ " + hhmm(new Date()) + " · " + f.name + (info ? " · " + info : "") };
+          state.slotStatus[s.slot] = { kind: "done", msg: "Replaced ✓ " + hhmm(new Date()) + " · " + f.name + (info ? " · " + info : "") };
         }).catch(function (e) {
           state.slotStatus[s.slot] = { kind: "failed", msg: errText(e) };
         }).then(renderSlots);
@@ -245,11 +276,11 @@
     var ext = (file.name.split(".").pop() || "").toLowerCase();
     return file.arrayBuffer().then(function (buf) {
       if (ext === "csv") return importCsv(slot, buf);
-      if (ext !== "xlsx" && ext !== "xlsm") throw new Error("סוג קובץ לא נתמך (." + ext + "). שמור אותו כ-xlsx ונסה שוב.");
+      if (ext !== "xlsx" && ext !== "xlsm") throw new Error("Unsupported file type (." + ext + "). Save it as .xlsx and try again.");
       return workbookSheetNames(buf).then(function (names) {
-        if (!names.length) throw new Error("לא נמצאו גיליונות בקובץ");
+        if (!names.length) throw new Error("No sheets found in the file");
         var src = slot.from || names[0];
-        if (names.indexOf(src) < 0) throw new Error("בקובץ אין גיליון בשם \"" + src + "\". קיימים: " + names.join(", "));
+        if (names.indexOf(src) < 0) throw new Error("The file has no sheet named \"" + src + "\". Sheets: " + names.join(", "));
         var b64 = toBase64(buf);
         return replaceSheet(slot.target, function (ctx, rel) {
           var opts = { sheetNamesToInsert: [src] };
@@ -257,17 +288,17 @@
           else opts.positionType = Excel.WorksheetPositionType.end;
           var res = ctx.workbook.insertWorksheetsFromBase64(b64, opts);
           return ctx.sync().then(function () {
-            if (!res.value || !res.value.length) throw new Error("Excel לא הוסיף את הגיליון");
+            if (!res.value || !res.value.length) throw new Error("Excel didn't add the sheet");
             return res.value[0];
           });
-        }).then(function () { return names.length > 1 ? "גיליון \"" + src + "\"" : ""; });
+        }).then(function () { return names.length > 1 ? "sheet \"" + src + "\"" : ""; });
       });
     });
   }
 
   function importCsv(slot, buf) {
     var rows = parseCsv(decodeText(buf));
-    if (!rows.length) throw new Error("קובץ ה-CSV ריק");
+    if (!rows.length) throw new Error("The CSV file is empty");
     var width = rows.reduce(function (m, r) { return Math.max(m, r.length); }, 0);
     rows = rows.map(function (r) { while (r.length < width) r.push(""); return r; });
     return replaceSheet(slot.target, function (ctx, rel) {
@@ -279,7 +310,7 @@
       }
       ws.load("id");
       return ctx.sync().then(function () { return ws.id; });
-    }).then(function () { return rows.length + " שורות"; });
+    }).then(function () { return rows.length + " rows"; });
   }
 
   // Rename old -> insert new next to it -> delete old -> rename new. Rolls back on failure.
@@ -322,7 +353,7 @@
   function workbookSheetNames(buf) {
     return JSZip.loadAsync(buf).then(function (zip) {
       var wb = zip.file("xl/workbook.xml");
-      if (!wb) throw new Error("הקובץ לא נראה כמו חוברת Excel תקינה");
+      if (!wb) throw new Error("This doesn't look like a valid Excel workbook");
       return wb.async("string");
     }).then(function (xml) {
       var doc = new DOMParser().parseFromString(xml, "application/xml");
@@ -334,7 +365,7 @@
   }
 
   function sheetNames() {
-    if (!state.inExcel) return Promise.reject(new Error("פעולה זו זמינה רק בתוך Excel"));
+    if (!state.inExcel) return Promise.reject(new Error("This only works inside Excel"));
     return Excel.run(function (ctx) {
       var ws = ctx.workbook.worksheets; ws.load("items/name");
       return ctx.sync().then(function () { return ws.items.map(function (w) { return w.name; }); });
@@ -346,27 +377,171 @@
     if (state.busy) return;
     state.busy = true; refreshButtons();
     $("results").innerHTML = "";
-    setStatus("קורא כללים…");
+    setStatus("Reading rules…");
     var reload = state.source === "github" ? loadRules() : Promise.resolve();
     reload.then(function () {
-      if (!state.rules || state.rules.errors.length) throw new Error("יש שגיאות בקובץ הכללים — תקן ונסה שוב.");
-      if (!state.inExcel) throw new Error("פעולה זו זמינה רק בתוך Excel");
-      setStatus("משווה נתונים…");
-      return runAlgorithms(false);
-    }).then(function (results) {
-      state.lastPreview = results;
-      renderResults(results, false);
+      if (!state.rules || state.rules.errors.length) throw new Error("The rules file has errors — fix them and try again.");
+      if (!state.inExcel) throw new Error("This only works inside Excel");
+      setStatus("Comparing data…");
+      if (state.rules.cdfAlgorithm) return runCdf(false).then(function (res) { renderCdfResults(res, false); });
+      return runAlgorithms(false).then(function (results) {
+        state.lastPreview = results;
+        renderResults(results, false);
+      });
     }).catch(showError).then(function () { state.busy = false; clearStatus(); refreshButtons(); });
   }
 
   function applyChanges() {
     if (state.busy) return;
     state.busy = true; refreshButtons();
-    setStatus("כותב שינויים…");
-    runAlgorithms(true).then(function (results) {
-      state.lastPreview = null;
-      renderResults(results, true);
-    }).catch(showError).then(function () { state.busy = false; clearStatus(); refreshButtons(); });
+    setStatus("Writing changes…");
+    var job = state.rules.cdfAlgorithm
+      ? runCdf(true).then(function (res) { renderCdfResults(res, true); })
+      : runAlgorithms(true).then(function (results) { state.lastPreview = null; renderResults(results, true); });
+    job.catch(showError).then(function () { state.busy = false; clearStatus(); refreshButtons(); });
+  }
+
+  // ================= CDF algorithm (code) =================
+  function cdfAlgoCard(r) {
+    var A = window.CdfAlgo, want = r.cdfAlgorithm.version, have = A.ALGORITHM_VERSION;
+    var html = '<div class="algo"><div class="algo-name">CDF algorithm</div>' +
+      '<div class="algo-meta">Algorithm version in the code: <b>' + esc(have) + "</b>" +
+      (want ? " · rules file expects: <b>" + esc(want) + "</b>" : "") + "</div>";
+    if (want && want !== have) html += '<div class="note warn" style="margin-top:6px">The rules file expects algorithm version ' + esc(want) +
+      " but the code implements " + esc(have) + ". The code needs an update before the results can be trusted.</div>";
+    html += "<ol>" + A.STAGES.map(function (s) {
+      return '<li class="' + (s.done ? "" : "onchange") + '">' + (s.done ? "✓ " : "Later: ") + esc(s.name) + "</li>";
+    }).join("") + "</ol></div>";
+    return html;
+  }
+
+  function readOptionalSheet(ctx, name) {
+    var ws = ctx.workbook.worksheets.getItemOrNullObject(name);
+    ws.load("name");
+    return ctx.sync().then(function () { return ws.isNullObject ? null : readSheet(ctx, ws); });
+  }
+
+  function runCdf(apply) {
+    var rules = state.rules, now = new Date();
+    return Excel.run(function (ctx) {
+      var data = {};
+      return readOptionalSheet(ctx, "CDF").then(function (d) {
+        if (!d) throw new Error("Sheet \"CDF\" was not found in this workbook");
+        data.cdf = d;
+        return readOptionalSheet(ctx, "GCC");
+      }).then(function (d) {
+        if (!d) throw new Error("Sheet \"GCC\" was not found — import CDF_List_Export first");
+        data.gcc = d;
+        return readOptionalSheet(ctx, "CDF SUMMARY");
+      }).then(function (d) {
+        data.summary = d;
+        var res = window.CdfAlgo.run({ cdf: data.cdf.values, gcc: data.gcc.values, now: now }, rules.cdfConfig);
+        res.compare = data.summary ? window.CdfAlgo.compareWithSheet(res.summary, data.summary.values) : null;
+        if (!apply) return res;
+        if (res.errors.some(function (e) { return e.stage === "00.1"; })) throw new Error("Headers don't match the algorithm — nothing was written.");
+        var cdfWs = ctx.workbook.worksheets.getItem("CDF"), gccWs = ctx.workbook.worksheets.getItem("GCC");
+        setStatus("Writing " + (res.cdfChanges.length + res.gccChanges.length) + " cells…");
+        return writeChanges(ctx, gccWs, res.gccChanges).then(function () {
+          return writeChanges(ctx, cdfWs, res.cdfChanges);
+        }).then(function () {
+          if (!rules.log) return;
+          var stamp = stampOf(now), name = "CDF algorithm " + window.CdfAlgo.ALGORITHM_VERSION + " · stage " + window.CdfAlgo.STAGE;
+          var rows = res.gccChanges.concat(res.cdfChanges).map(function (c) {
+            return [stamp, name, c.sheet, String(c.row), c.key, c.colLetter, show(c.oldValue, null), show(c.newValue, null), c.rule === "20.2" ? "" : "Rule " + c.rule + " — " + c.why];
+          });
+          res.info.onlyGcc.forEach(function (k) { rows.push([stamp, name, "GCC", "", k, "", "", "", E.LOG_NOTES.notFound]); });
+          if (!rows.length) rows.push([stamp, name, "", "", "", "", "", "", E.LOG_NOTES.none]);
+          setStatus("Writing log…");
+          return appendLog(ctx, rules.log, rows);
+        }).then(function () { return res; });
+      });
+    });
+  }
+
+  function renderCdfResults(res, applied) {
+    var nChanges = res.cdfChanges.length + res.gccChanges.length;
+    var html = '<div class="res-block"><div class="res-title">CDF algorithm · stage ' + res.stage + "</div>";
+    if (res.errors.length) html += '<div class="note bad"><b>' + res.errors.length + " error" + (res.errors.length > 1 ? "s" : "") + "</b> — these cells are not changed:<ul>" +
+      res.errors.map(function (e) { return "<li>" + esc((e.key ? e.key + ": " : "") + e.message) + " <span class=\"rule\">(" + esc(e.stage) + ")</span></li>"; }).join("") + "</ul></div>";
+    if (!res.summary) { $("results").innerHTML = html + "</div>"; return; }
+
+    html += '<div class="tiles">' +
+      tile(res.info.gccRows, "CDFs in GCC") +
+      tile(res.info.matched, "Matched in CDF") +
+      tile(res.info.onlyGcc.length, "Only in GCC", res.info.onlyGcc.length ? "warnt" : "") +
+      tile(countKeys(res.cdfChanges), applied ? "CDFs updated" : "CDFs to change", "hl") +
+      tile(nChanges, applied ? "Cells updated" : "Cells to change", "hl") +
+      tile(res.warnings.length, "Warnings", res.warnings.length ? "warnt" : "") + "</div>";
+
+    if (applied && nChanges) html += '<div class="note ok">Update written ✓' + (state.rules.log ? " — every change and its previous value is in sheet <b>" + esc(state.rules.log) + "</b>." : "") + "</div>";
+    if (!nChanges) html += '<div class="note ok">Nothing to update — the CDF sheet already matches GCC.</div>';
+    if (res.info.onlyGcc.length) html += '<div class="note warn">In GCC but not in the CDF sheet (add them as new rows):' + chips(res.info.onlyGcc) + "</div>";
+    if (res.info.onlyCdf.length) html += '<div class="note warn">In the CDF sheet but not in GCC (left as they are):' + chips(res.info.onlyCdf) + "</div>";
+    if (res.warnings.length) html += '<div class="note warn"><ul>' + res.warnings.map(function (w) { return "<li>" + esc(w.key + ": " + w.message) + "</li>"; }).join("") + "</ul></div>";
+
+    html += crossCheckHtml(res, applied);
+    if (nChanges) html += cdfChangesTable(res.gccChanges.concat(res.cdfChanges));
+    html += "</div>";
+
+    if (!applied && nChanges) {
+      html += '<div class="confirm go"><p><b>' + nChanges + "</b> cell" + (nChanges > 1 ? "s" : "") + " will be written to sheets CDF" +
+        (res.gccChanges.length ? " and GCC" : "") + ". Save the workbook first — Ctrl+Z may not undo this" + (state.rules.log ? ", but the log keeps the previous values" : "") + ".</p>" +
+        '<div class="row"><button id="applyBtn" class="btn ok">Apply ' + nChanges + " change" + (nChanges > 1 ? "s" : "") + "</button>" +
+        '<button id="cancelApply" class="btn ghost">Cancel</button></div></div>';
+    }
+    $("results").innerHTML = html;
+    var ab = $("applyBtn");
+    if (ab) ab.addEventListener("click", applyChanges);
+    var cb = $("cancelApply");
+    if (cb) cb.addEventListener("click", function () { $("results").innerHTML = ""; });
+    $("results").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function countKeys(changes) {
+    var k = {}; changes.forEach(function (c) { k[c.key] = true; }); return Object.keys(k).length;
+  }
+
+  // the cross-check: control totals (130.6) + every computed table against CDF SUMMARY in this workbook
+  function crossCheckHtml(res, applied) {
+    var ok = res.checks.filter(function (c) { return c.ok; }).length;
+    var html = '<div class="xcheck"><div class="xcheck-title">Cross-check</div>' +
+      '<div class="xsub">Control totals (' + ok + "/" + res.checks.length + " OK)</div><ul class=\"xlist\">" +
+      res.checks.map(function (c) {
+        return '<li class="' + (c.ok ? "ok" : "bad") + '"><span class="mark">' + (c.ok ? "✓" : "✗") + "</span>" + esc(c.name) +
+          '<div class="xdetail">' + esc(c.detail) + "</div></li>";
+      }).join("") + "</ul>";
+    if (res.compare) {
+      var same = res.compare.filter(function (t) { return t.found && !t.diffs.length; }).length;
+      html += '<div class="xsub">CDF SUMMARY tables: result vs. what the workbook shows now (' + same + "/" + res.compare.length + " identical)</div>" +
+        '<p class="hint" style="margin:2px 0 6px">' + (applied ? "Writing these tables to CDF SUMMARY comes with stage 3."
+          : "A difference here is expected when GCC changed since the last run — it shows what the table will be after the update.") + "</p><ul class=\"xlist\">" +
+        res.compare.map(function (t) {
+          if (!t.found) return '<li class="warn"><span class="mark">?</span>' + esc(t.table) + '<div class="xdetail">Not found in CDF SUMMARY</div></li>';
+          if (!t.diffs.length) return '<li class="ok"><span class="mark">=</span>' + esc(t.table) + ' <span class="xdetail-inline">(' + esc(t.at) + ")</span></li>";
+          return '<li class="diff"><span class="mark">≠</span>' + esc(t.table) + ' <span class="xdetail-inline">(' + esc(t.at) + ")</span>" +
+            '<table class="xdiff"><tr><th></th><th>Now</th><th>Result</th></tr>' +
+            t.diffs.map(function (d) { return "<tr><td>" + esc(d.label) + "</td><td>" + esc(d.current) + "</td><td>" + esc(d.computed) + "</td></tr>"; }).join("") +
+            "</table></li>";
+        }).join("") + "</ul>";
+    }
+    html += '<details class="xtables"><summary>Show the computed tables</summary>' +
+      res.summary.tables.map(function (t) {
+        return '<div class="xsub">' + esc(t.name) + '</div><table class="xdiff"><tr>' + t.headers.map(function (h) { return "<th>" + esc(h) + "</th>"; }).join("") + "</tr>" +
+          t.rows.map(function (r) { return "<tr>" + r.map(function (v) { return "<td>" + esc(v).replace(/\n/g, "<br>") + "</td>"; }).join("") + "</tr>"; }).join("") + "</table>";
+      }).join("") + "</details></div>";
+    return html;
+  }
+
+  function cdfChangesTable(changes) {
+    var rows = changes.slice(0, MAX_ROWS_SHOWN).map(function (c) {
+      return '<tr title="' + esc("Rule " + c.rule + (c.why ? " — " + c.why : "") + (c.source ? " · " + c.source : "")) + '"><td>' + esc(c.sheet === "GCC" ? "GCC " + c.row : c.row) +
+        '</td><td class="v k">' + esc(c.key) + "</td><td>" + c.colLetter +
+        '</td><td class="v old">' + esc(show(c.oldValue, null) || "(empty)") + '</td><td class="v new">' + esc(show(c.newValue, null) || "(empty)") +
+        '</td><td class="rule">' + esc(c.rule) + "</td></tr>";
+    }).join("");
+    var more = changes.length > MAX_ROWS_SHOWN ? '<div class="more">and ' + (changes.length - MAX_ROWS_SHOWN) + " more changes…</div>" : "";
+    return '<div class="tbl-wrap"><table><thead><tr><th>Row</th><th>Key</th><th>Col</th><th>Before</th><th>After</th><th>Rule</th></tr></thead><tbody>' +
+      rows + "</tbody></table>" + more + "</div>";
   }
 
   function runAlgorithms(apply) {
@@ -379,9 +554,9 @@
           var updWs = ctx.workbook.worksheets.getItemOrNullObject(algo.update);
           baseWs.load("name"); updWs.load("name");
           return ctx.sync().then(function () {
-            if (!algo.baseFirst && baseWs.isNullObject) throw new Error("גיליון הבסיס \"" + algo.base + "\" לא נמצא בחוברת");
-            if (updWs.isNullObject) throw new Error("גיליון העדכון \"" + algo.update + "\" לא נמצא — ייבאת את הקובץ?");
-            if (baseWs.name === updWs.name) throw new Error("גיליון הבסיס וגיליון העדכון הם אותו גיליון (" + baseWs.name + ")");
+            if (!algo.baseFirst && baseWs.isNullObject) throw new Error("Base sheet \"" + algo.base + "\" was not found in the workbook");
+            if (updWs.isNullObject) throw new Error("Update sheet \"" + algo.update + "\" was not found — did you import the file?");
+            if (baseWs.name === updWs.name) throw new Error("The base sheet and the update sheet are the same sheet (" + baseWs.name + ")");
             var data = [];
             return readSheet(ctx, baseWs).then(function (b) { data.push(b); return readSheet(ctx, updWs); })
               .then(function (u) { data.push(u); return data; });
@@ -390,14 +565,14 @@
             res.algo = algo; res.baseName = baseWs.name; res.updateName = updWs.name;
             out.push(res);
             if (apply && res.changes.length) {
-              setStatus("כותב " + res.changes.length + " תאים לגיליון " + baseWs.name + "…");
+              setStatus("Writing " + res.changes.length + " cells to sheet " + baseWs.name + "…");
               return writeChanges(ctx, baseWs, res.changes);
             }
           });
         });
       });
       return chain.then(function () {
-        if (apply && rules.log) { setStatus("כותב יומן…"); return writeLog(ctx, rules.log, out, now); }
+        if (apply && rules.log) { setStatus("Writing log…"); return writeLog(ctx, rules.log, out, now); }
       }).then(function () { return out; });
     });
   }
@@ -459,7 +634,7 @@
       return ctx.sync().then(function () {
         if (!fresh && !used.isNullObject) return used.rowIndex + used.rowCount;
         var hdr = ws.getRange("A1:I1");
-        hdr.values = [["זמן הרצה", "אלגוריתם", "גיליון", "שורה", "מפתח (CDF)", "עמודה", "ערך קודם", "ערך חדש", "הערה"]];
+        hdr.values = [["Run time", "Algorithm", "Sheet", "Row", "Key (CDF)", "Column", "Old value", "New value", "Note"]];
         hdr.format.font.bold = true;
         hdr.format.fill.color = "#13294B";
         hdr.format.font.color = "#FFFFFF";
@@ -504,24 +679,24 @@
       total += res.changes.length;
       html += '<div class="res-block">';
       html += '<div class="res-title">' + esc(res.algo.name) + "</div>";
-      html += '<p class="hint">בסיס: <b>' + esc(res.baseName) + "</b> · עדכון: <b>" + esc(res.updateName) + "</b></p>";
+      html += '<p class="hint">Base: <b>' + esc(res.baseName) + "</b> · Update: <b>" + esc(res.updateName) + "</b></p>";
       html += '<div class="tiles">' +
-        tile(s.uniqueUpdateKeys, "מזהים בעדכון") +
-        tile(s.matchedKeys, "נמצאו בבסיס") +
-        tile(s.unmatched.length, "לא נמצאו", s.unmatched.length ? "warnt" : "") +
-        tile(s.changedRows, applied ? "שורות עודכנו" : "שורות ישתנו", "hl") +
-        tile(s.changedCells, applied ? "תאים עודכנו" : "תאים ישתנו", "hl") +
-        tile(s.matchedRows - s.changedRows, "ללא שינוי") +
+        tile(s.uniqueUpdateKeys, "IDs in update") +
+        tile(s.matchedKeys, "Found in base") +
+        tile(s.unmatched.length, "Not found", s.unmatched.length ? "warnt" : "") +
+        tile(s.changedRows, applied ? "Rows updated" : "Rows to change", "hl") +
+        tile(s.changedCells, applied ? "Cells updated" : "Cells to change", "hl") +
+        tile(s.matchedRows - s.changedRows, "Unchanged") +
         "</div>";
 
-      if (applied && res.changes.length) html += '<div class="note ok">העדכון נכתב ✓' + (state.rules.log ? " — כל השינויים והערכים הקודמים נשמרו בגיליון <b>" + esc(state.rules.log) + "</b>." : "") + "</div>";
-      if (!res.changes.length) html += '<div class="note ok">אין מה לעדכן — גיליון הבסיס כבר תואם לקובץ העדכון.</div>';
+      if (applied && res.changes.length) html += '<div class="note ok">Update written ✓' + (state.rules.log ? " — every change and its previous value is saved in sheet <b>" + esc(state.rules.log) + "</b>." : "") + "</div>";
+      if (!res.changes.length) html += '<div class="note ok">Nothing to update — the base sheet already matches the update file.</div>';
 
       if (s.duplicateUpdateKeys.length) {
-        html += '<div class="note warn">מזהים שמופיעים יותר מפעם אחת בקובץ העדכון (נלקחה השורה האחרונה):' + chips(s.duplicateUpdateKeys) + "</div>";
+        html += '<div class="note warn">IDs that appear more than once in the update file (the last row was used):' + chips(s.duplicateUpdateKeys) + "</div>";
       }
       if (s.unmatched.length) {
-        html += '<div class="note warn">' + s.unmatched.length + " מזהים מקובץ העדכון לא נמצאו בגיליון הבסיס:" +
+        html += '<div class="note warn">' + s.unmatched.length + " ID" + (s.unmatched.length > 1 ? "s" : "") + " from the update file " + (s.unmatched.length > 1 ? "were" : "was") + " not found in the base sheet:" +
           chips(s.unmatched.map(function (u) { return u.key; })) + "</div>";
       }
       if (res.changes.length) html += changesTable(res.changes);
@@ -529,10 +704,10 @@
     });
 
     if (!applied && total > 0) {
-      html += '<div class="confirm go"><p>ייכתבו <b>' + total + "</b> תאים. מומלץ לשמור את הקובץ לפני — ייתכן שלא ניתן יהיה לבטל עם Ctrl+Z" +
-        (state.rules.log ? ", אבל היומן שומר את הערכים הקודמים" : "") + ".</p>" +
-        '<div class="row"><button id="applyBtn" class="btn ok">החל ' + total + " שינויים</button>" +
-        '<button id="cancelApply" class="btn ghost">ביטול</button></div></div>';
+      html += '<div class="confirm go"><p><b>' + total + "</b> cell" + (total > 1 ? "s" : "") + " will be written. Save the workbook first — Ctrl+Z may not undo this" +
+        (state.rules.log ? ", but the log keeps the previous values" : "") + ".</p>" +
+        '<div class="row"><button id="applyBtn" class="btn ok">Apply ' + total + " change" + (total > 1 ? "s" : "") + "</button>" +
+        '<button id="cancelApply" class="btn ghost">Cancel</button></div></div>';
     }
     $("results").innerHTML = html;
     var ab = $("applyBtn");
@@ -545,10 +720,10 @@
   function changesTable(changes) {
     var rows = changes.slice(0, MAX_ROWS_SHOWN).map(function (c) {
       return '<tr class="' + (c.onChange ? "auto" : "") + '"><td>' + c.row + '</td><td class="v k">' + esc(c.key) + "</td><td>" + c.colLetter +
-        '</td><td class="v old">' + esc(show(c.oldValue, c.oldFormat) || "(ריק)") + '</td><td class="v new">' + esc(show(c.newValue, c.numberFormat || c.oldFormat) || "(ריק)") + "</td></tr>";
+        '</td><td class="v old">' + esc(show(c.oldValue, c.oldFormat) || "(empty)") + '</td><td class="v new">' + esc(show(c.newValue, c.numberFormat || c.oldFormat) || "(empty)") + "</td></tr>";
     }).join("");
-    var more = changes.length > MAX_ROWS_SHOWN ? '<div class="more">ועוד ' + (changes.length - MAX_ROWS_SHOWN) + " שינויים…</div>" : "";
-    return '<div class="tbl-wrap"><table><thead><tr><th>שורה</th><th>מפתח</th><th>עמ׳</th><th>לפני</th><th>אחרי</th></tr></thead><tbody>' +
+    var more = changes.length > MAX_ROWS_SHOWN ? '<div class="more">and ' + (changes.length - MAX_ROWS_SHOWN) + " more changes…</div>" : "";
+    return '<div class="tbl-wrap"><table><thead><tr><th>Row</th><th>Key</th><th>Col</th><th>Before</th><th>After</th></tr></thead><tbody>' +
       rows + "</tbody></table>" + more + "</div>";
   }
 
@@ -575,7 +750,7 @@
     var ws = s.first ? ctx.workbook.worksheets.getFirst(true) : ctx.workbook.worksheets.getItemOrNullObject(s.name);
     ws.load("name");
     return ctx.sync().then(function () {
-      if (!s.first && ws.isNullObject) throw new Error("הגיליון \"" + s.name + "\" (NEWROW_SHEET) לא נמצא");
+      if (!s.first && ws.isNullObject) throw new Error("Sheet \"" + s.name + "\" (NEWROW_SHEET) was not found");
       return ws;
     });
   }
@@ -585,8 +760,8 @@
       var text = CdfPrompt.pastePrompt(base);
       return copyText(text).then(function (ok) {
         $("copyPromptMsg").textContent = ok
-          ? "ההנחיה הועתקה ✓ — הדבק אותה ב-Claude יחד עם הקבצים."
-          : "ההעתקה נכשלה בסביבה הזו — פתח \"הצג את תוכן הקובץ\" למטה והעתק ידנית.";
+          ? "Prompt copied ✓ — paste it into Claude together with the files."
+          : "Copy failed here — click the button again.";
       });
     });
   }
@@ -615,7 +790,7 @@
     if (!state.queue || !state.queue.length) return;
     var item = state.queue.shift();
     state.busy = true; refreshButtons();
-    setStatus("מחפש את המקום בקובץ…");
+    setStatus("Finding the place in the workbook…");
     prepareDraft(item).then(function () { /* rendered */ })
       .catch(function (e) { showNewRowNote(errText(e), "bad"); })
       .then(function () { state.busy = false; clearStatus(); refreshButtons(); });
@@ -663,14 +838,14 @@
   function renderDraft() {
     var d = state.draft, p = d.place, item = d.item, q = queuePos();
     var flags = (item.fields.flags || []).concat(d.built.warnings);
-    var html = q.total > 1 ? '<div class="queue"><span>חריג ' + q.n + " מתוך " + q.total + "</span><span dir=\"ltr\">" + esc(d.built.cdf) + "</span></div>" : "";
+    var html = q.total > 1 ? '<div class="queue"><span>CDF ' + q.n + " of " + q.total + "</span><span>" + esc(d.built.cdf) + "</span></div>" : "";
     html += '<div class="nr-target">' + (p.target.existing
-      ? "CDF " + esc(d.built.cdf) + " כבר קיים בשורה " + p.target.row + " בגיליון " + esc(p.ws) + " — השורה תתעדכן"
-      : "שורה חדשה " + p.target.row + " בגיליון " + esc(p.ws)) + "</div>";
-    if (flags.length) html += '<div class="note warn">לבדוק:<ul>' + flags.map(function (f) { return "<li>" + esc(f) + "</li>"; }).join("") + "</ul></div>";
+      ? "CDF " + esc(d.built.cdf) + " already exists in row " + p.target.row + " of sheet " + esc(p.ws) + " — that row will be updated"
+      : "New row " + p.target.row + " in sheet " + esc(p.ws)) + "</div>";
+    if (flags.length) html += '<div class="note warn">Check:<ul>' + flags.map(function (f) { return "<li>" + esc(f) + "</li>"; }).join("") + "</ul></div>";
 
     d.built.cells.forEach(function (c, i) {
-      var header = E.cleanHeader(p.headers[c.idx]) || "ללא כותרת";
+      var header = E.cleanHeader(p.headers[c.idx]) || "no header";
       var old = p.existing[c.idx];
       var oldShow = show(old, p.existingFmt[c.idx]);
       html += '<div class="nr-field"><div class="nr-label"><span class="col">' + c.col + '</span><span class="hdr">' + esc(header) +
@@ -679,18 +854,18 @@
         html += '<textarea class="inp" dir="ltr" data-i="' + i + '">' + esc(c.display) + "</textarea>";
       } else {
         html += '<input class="inp" dir="ltr" data-i="' + i + '" value="' + esc(c.display) + '"' +
-          (c.kind === "link" ? ' placeholder="שם הקובץ, למשל A330-1-NNN.-.pdf"' : "") + ">";
-        if (c.kind === "link" && c.prefix) html += '<div class="nr-link">קישור: ' + esc(c.prefix) + "&lt;שם הקובץ&gt;</div>";
+          (c.kind === "link" ? ' placeholder="File name, e.g. A330-1-NNN.-.pdf"' : "") + ">";
+        if (c.kind === "link" && c.prefix) html += '<div class="nr-link">Link: ' + esc(c.prefix) + "&lt;file name&gt;</div>";
       }
-      if (!E.isEmpty(old) && oldShow !== c.display) html += '<div class="nr-old">קיים בתא: ' + esc(oldShow) + " — יוחלף</div>";
+      if (!E.isEmpty(old) && oldShow !== c.display) html += '<div class="nr-old">Currently in the cell: ' + esc(oldShow) + " — will be replaced</div>";
       html += "</div>";
     });
 
     var more = state.queue && state.queue.length;
-    html += '<div class="confirm go" style="margin-top:12px"><p>שדה ריק לא נכתב (ולא מוחק ערך קיים). הכל יירשם ב-' + esc(state.rules.log || "יומן") + ".</p>" +
-      '<div class="row wrap"><button id="writeRowBtn" class="btn ok">' + (p.target.existing ? "עדכן שורה " : "הוסף שורה ") + p.target.row + "</button>" +
-      (more ? '<button id="skipRowBtn" class="btn ghost">דלג</button>' : "") +
-      '<button id="cancelRowBtn" class="btn ghost">' + (more ? "בטל הכל" : "ביטול") + "</button></div></div>";
+    html += '<div class="confirm go" style="margin-top:12px"><p>Empty fields are not written (and don\'t erase existing values). Everything is recorded in ' + esc(state.rules.log || "the log") + ".</p>" +
+      '<div class="row wrap"><button id="writeRowBtn" class="btn ok">' + (p.target.existing ? "Update row " : "Add row ") + p.target.row + "</button>" +
+      (more ? '<button id="skipRowBtn" class="btn ghost">Skip</button>' : "") +
+      '<button id="cancelRowBtn" class="btn ghost">' + (more ? "Cancel all" : "Cancel") + "</button></div></div>";
     $("newRowForm").innerHTML = html;
     $("writeRowBtn").addEventListener("click", writeDraft);
     var sk = $("skipRowBtn");
@@ -717,7 +892,7 @@
     });
 
     state.busy = true; refreshButtons();
-    setStatus("כותב לקובץ…");
+    setStatus("Writing to the workbook…");
     var now = new Date(), stamp = stampOf(now), row = d.place.target.row;
     Excel.run(function (ctx) {
       return newRowSheet(ctx).then(function (ws) {
@@ -751,9 +926,9 @@
       var done = state.written; state.written = [];
       $("pasteBox").value = "";
       $("newRowForm").innerHTML = '<div class="note ok">' + (done.length > 1
-        ? "נכתבו " + done.length + " חריגים: " + done.map(function (w) { return esc(w.cdf) + " (שורה " + w.row + ")"; }).join(", ")
-        : "נכתבו " + n + " תאים בשורה " + row + " (CDF " + esc(cdf) + ")") + " ✓" +
-        '<div class="row" style="margin-top:6px"><button id="mailNewRow" class="btn small">שלח במייל</button></div></div>';
+        ? done.length + " CDFs written: " + done.map(function (w) { return esc(w.cdf) + " (row " + w.row + ")"; }).join(", ")
+        : n + " cells written in row " + row + " (CDF " + esc(cdf) + ")") + " ✓" +
+        '<div class="row" style="margin-top:6px"><button id="mailNewRow" class="btn small">Send by email</button></div></div>';
       $("mailNewRow").addEventListener("click", function () {
         $("mailKind").value = "newrows"; $("mailSubject").value = defaultSubject();
         $("mailCard").open = true; $("mailCard").scrollIntoView({ behavior: "smooth" });
@@ -765,16 +940,16 @@
 
   // ================= email =================
   var MAIL_KINDS = [
-    { id: "changes", label: "שינויים מההרצה האחרונה", subject: "CDF status update" },
-    { id: "notfound", label: "CDF שלא נמצאו בהרצה האחרונה", subject: "CDFs not found in tracker" },
-    { id: "newrows", label: "שורות חדשות שנוספו היום", subject: "New CDF entries" }
+    { id: "changes", label: "Changes from the last run", subject: "CDF status update" },
+    { id: "notfound", label: "CDFs not found in the last run", subject: "CDFs not found in tracker" },
+    { id: "newrows", label: "New rows added today", subject: "New CDF entries" }
   ];
 
   function renderMailKinds() {
     var sel = $("mailKind"), keep = sel.value;
     var opts = MAIL_KINDS.map(function (k) { return '<option value="' + k.id + '">' + esc(k.label) + "</option>"; });
     (state.rules ? state.rules.reports : []).forEach(function (r, i) {
-      opts.push('<option value="report:' + i + '">דוח: ' + esc(r.name) + "</option>");
+      opts.push('<option value="report:' + i + '">Report: ' + esc(r.name) + "</option>");
     });
     sel.innerHTML = opts.join("");
     if (keep && sel.querySelector('option[value="' + keep + '"]')) sel.value = keep;
@@ -800,7 +975,7 @@
 
   function renderGroups() {
     var groups = loadGroups(), box = $("groupChips");
-    if (!groups.length) { box.innerHTML = '<span class="hint" style="margin:0">אין קבוצות שמורות עדיין.</span>'; return; }
+    if (!groups.length) { box.innerHTML = '<span class="hint" style="margin:0">No saved groups yet.</span>'; return; }
     box.innerHTML = groups.map(function (g, i) {
       return '<span class="chip" data-g="' + i + '" title="' + esc(g.addresses.join("; ")) + '">' + esc(g.name) +
         (g.rules ? "" : '<span class="x" data-del="' + i + '">✕</span>') + "</span>";
@@ -821,7 +996,7 @@
 
   function saveLocalGroup() {
     var name = $("groupName").value.trim(), addrs = splitAddrs($("mailTo").value);
-    if (!name || !addrs.length) { $("groupName").placeholder = "צריך שם ונמענים בשדה To"; return; }
+    if (!name || !addrs.length) { $("groupName").placeholder = "Needs a name and recipients in To"; return; }
     var local = loadGroups().filter(function (g) { return !g.rules && g.name !== name; });
     local.push({ name: name, addresses: addrs });
     try { localStorage.setItem(GROUPS_KEY, JSON.stringify(local)); } catch (e) { /* ignore */ }
@@ -851,7 +1026,7 @@
     var kind = $("mailKind").value, title = $("mailSubject").value.trim() || defaultSubject();
     state.busy = true; refreshButtons();
     $("mailPreview").innerHTML = "";
-    setStatus("מכין מייל…");
+    setStatus("Preparing email…");
     Excel.run(function (ctx) {
       var headerRow = state.rules.newRow.headerRow || 1;
       if (kind.indexOf("report:") === 0) {
@@ -859,7 +1034,7 @@
         var ws = rep.sheet.first ? ctx.workbook.worksheets.getFirst(true) : ctx.workbook.worksheets.getItemOrNullObject(rep.sheet.name);
         ws.load("name");
         return ctx.sync().then(function () {
-          if (!rep.sheet.first && ws.isNullObject) throw new Error("הגיליון \"" + rep.sheet.name + "\" לא נמצא");
+          if (!rep.sheet.first && ws.isNullObject) throw new Error("Sheet \"" + rep.sheet.name + "\" was not found");
           return readSheet(ctx, ws);
         }).then(function (data) {
           var width = Math.max.apply(null, rep.columns.map(function (c) { return c.idx; })) + 1;
@@ -882,11 +1057,11 @@
         });
       }
 
-      if (!state.rules.log) throw new Error("אין יומן (LOG NONE) — אין ממה לבנות את המייל");
+      if (!state.rules.log) throw new Error("There is no log (LOG NONE) — nothing to build the email from");
       var logWs = ctx.workbook.worksheets.getItemOrNullObject(state.rules.log);
       logWs.load("name");
       return ctx.sync().then(function () {
-        if (logWs.isNullObject) throw new Error("עדיין אין גיליון " + state.rules.log + " — הרץ עדכון או הוסף שורה קודם");
+        if (logWs.isNullObject) throw new Error("There is no " + state.rules.log + " sheet yet — run an update or add a row first");
         return readSheet(ctx, logWs);
       }).then(function (logData) {
         var run = E.lastRunFromLog(logData.values, dateStr(new Date()));
@@ -921,7 +1096,7 @@
         });
       });
     }).then(function (doc) {
-      if (doc.empty) { $("mailPreview").innerHTML = '<div class="note warn">אין נתונים לשליחה בפלט הזה.</div>'; state.mail = null; return; }
+      if (doc.empty) { $("mailPreview").innerHTML = '<div class="note warn">Nothing to send for this output.</div>'; state.mail = null; return; }
       state.mail = E.buildEmail(doc);
       renderMail();
     }).catch(function (e) { $("mailPreview").innerHTML = '<div class="note bad">' + esc(errText(e)) + "</div>"; })
@@ -939,17 +1114,17 @@
       '<div class="mail-box"><div class="mail-head"><b>To:</b> ' + esc(to.join("; ") || "—") +
       (cc.length ? "<br><b>Cc:</b> " + esc(cc.join("; ")) : "") + "<br><b>Subject:</b> " + esc(m.subject) + "</div>" +
       '<div class="mail-body">' + m.html + "</div></div>" +
-      (tooLong ? '<div class="note warn" style="margin-top:8px">המייל ארוך מדי לפתיחה ישירה — הטבלה תועתק, ובטיוטה רק להדביק (Ctrl+V).</div>' : "") +
+      (tooLong ? '<div class="note warn" style="margin-top:8px">The email is too long to open directly — the table will be copied; just paste it into the draft (Ctrl+V).</div>' : "") +
       '<div class="mail-actions">' +
-      '<a id="openMail" class="btn primary" href="' + esc(url) + '">פתח טיוטה ב-Outlook</a>' +
-      '<button id="copyMail" class="btn" type="button">העתק כטבלה (להדבקה במייל)</button></div>' +
+      '<a id="openMail" class="btn primary" href="' + esc(url) + '">Open draft in Outlook</a>' +
+      '<button id="copyMail" class="btn" type="button">Copy as table (to paste in an email)</button></div>' +
       '<div id="copyMsg" class="nr-meta"></div>';
-    if (!to.length) $("copyMsg").textContent = "אין נמענים — אפשר להוסיף ב-Outlook.";
+    if (!to.length) $("copyMsg").textContent = "No recipients — you can add them in Outlook.";
     $("openMail").addEventListener("click", function () {
-      if (tooLong) copyRich(m.html, m.text).then(function (ok) { $("copyMsg").textContent = ok ? "הטבלה הועתקה — הדבק בגוף המייל." : "ההעתקה נכשלה — השתמש בכפתור ההעתקה."; });
+      if (tooLong) copyRich(m.html, m.text).then(function (ok) { $("copyMsg").textContent = ok ? "Table copied — paste it into the email body." : "Copy failed — use the copy button."; });
     });
     $("copyMail").addEventListener("click", function () {
-      copyRich(m.html, m.text).then(function (ok) { $("copyMsg").textContent = ok ? "הועתק ✓ — הדבק בגוף המייל (Ctrl+V)." : "ההעתקה נכשלה בסביבה הזו."; });
+      copyRich(m.html, m.text).then(function (ok) { $("copyMsg").textContent = ok ? "Copied ✓ — paste it into the email body (Ctrl+V)." : "Copy failed here."; });
     });
   }
 
@@ -1004,7 +1179,7 @@
     var ok = !!state.rules && !state.rules.errors.length;
     $("importBtn").disabled = state.busy || !ok || !state.inExcel || !state.canImport || !chosenSlots().length;
     var n = chosenSlots().length;
-    $("importBtn").textContent = n > 1 ? "החלף " + n + " גיליונות" : "החלף גיליון";
+    $("importBtn").textContent = n > 1 ? "Replace " + n + " sheets" : "Replace sheet";
     $("previewBtn").disabled = state.busy || !ok || !state.inExcel;
     var ab = $("applyBtn"); if (ab) ab.disabled = state.busy;
     var hasRowSpec = ok && state.rules.newRow.cells.length > 0;
@@ -1020,10 +1195,10 @@
   function showError(e) { $("results").innerHTML = '<div class="note bad">' + esc(errText(e)) + "</div>"; }
 
   function errText(e) {
-    if (!e) return "שגיאה לא ידועה";
+    if (!e) return "Unknown error";
     var msg = e.message || String(e);
-    if (e.code === "AccessDenied" || /protect/i.test(msg)) msg += " (ייתכן שהחוברת או הגיליון מוגנים)";
-    if (e.code === "UnsupportedFeature") msg += " (הקובץ מכיל רכיב שלא נתמך בהעתקה, למשל PivotTable או גרף ב-Excel באינטרנט)";
+    if (e.code === "AccessDenied" || /protect/i.test(msg)) msg += " (the workbook or sheet may be protected)";
+    if (e.code === "UnsupportedFeature") msg += " (the file contains something that can't be copied, e.g. a PivotTable or chart in Excel on the web)";
     return msg;
   }
 
