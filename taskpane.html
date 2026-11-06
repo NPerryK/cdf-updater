@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CDF Updater</title>
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <script src="lib/jszip.min.js"></script>
+  <script src="engine.js"></script>
+  <script src="prompt.js"></script>
+  <link rel="stylesheet" href="taskpane.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg>
+      </span>
+      <div>
+        <h1>CDF Updater</h1>
+        <p class="sub">ייבוא קבצים והרצת כללי עדכון</p>
+      </div>
+    </div>
+    <span id="rulesPill" class="pill">טוען כללים…</span>
+  </header>
+
+  <div id="banner" class="banner hidden"></div>
+
+  <!-- step 1 -->
+  <section class="card">
+    <div class="card-head">
+      <span class="step">1</span>
+      <h2>ייבוא קבצים</h2>
+    </div>
+    <p class="hint">כל קובץ נמחק ומחליף את הגיליון שלו בקובץ הגדול (באותו מיקום).</p>
+    <div id="slots" class="slots"></div>
+    <div id="importConfirm" class="confirm hidden">
+      <p id="importConfirmText"></p>
+      <div class="row">
+        <button id="importYes" class="btn danger">כן, החלף</button>
+        <button id="importNo" class="btn ghost">ביטול</button>
+      </div>
+    </div>
+    <button id="importBtn" class="btn primary wide" disabled>החלף גיליונות</button>
+  </section>
+
+  <!-- step 2 -->
+  <section class="card">
+    <div class="card-head">
+      <span class="step">2</span>
+      <h2>הרצת האלגוריתם</h2>
+    </div>
+    <div id="algos"></div>
+    <button id="previewBtn" class="btn primary wide">בדוק שינויים</button>
+    <div id="results"></div>
+  </section>
+
+  <!-- step 3: new row from PDF pair -->
+  <details class="card fold" id="newRowCard">
+    <summary class="card-head">
+      <span class="step">3</span>
+      <h2>שורה חדשה לחריג</h2>
+      <span class="chev" aria-hidden="true">▾</span>
+    </summary>
+    <p class="hint">Claude קורא את PDF החריג ואת PDF ה-ATT ← אתה בודק ומאשר. אם ה-CDF כבר קיים בקובץ, השורה שלו מתעדכנת.</p>
+    <div id="pastePane">
+      <ol class="mini-steps">
+        <li>
+          <div class="row wrap">
+            <button id="copyPrompt" class="btn small" type="button">העתק הנחיה ל-Claude</button>
+            <button id="openClaude" class="linkbtn" type="button">פתח את Claude ↗</button>
+          </div>
+          <div id="copyPromptMsg" class="nr-meta"></div>
+        </li>
+        <li>ב-Claude: הדבק את ההנחיה, גרור את קבצי ה-PDF (זוג אחד או כמה זוגות) ושלח.</li>
+        <li>בתשובה, לחץ Copy על בלוק הקוד והדבק כאן:</li>
+      </ol>
+      <textarea id="pasteBox" class="inp" dir="ltr" rows="4" placeholder='```json&#10;[ { "main_file": "A330-1-NNN.-.pdf", ... } ]&#10;```'></textarea>
+      <button id="parsePaste" class="btn primary wide" disabled>קרא את התשובה</button>
+    </div>
+
+    <div id="newRowForm"></div>
+  </details>
+
+  <!-- step 4: email -->
+  <details class="card fold" id="mailCard">
+    <summary class="card-head">
+      <span class="step">4</span>
+      <h2>שליחת מייל</h2>
+      <span class="chev" aria-hidden="true">▾</span>
+    </summary>
+    <label class="fld" for="mailKind">מה לשלוח</label>
+    <select id="mailKind" class="inp"></select>
+
+    <div class="fld">נמענים</div>
+    <div id="groupChips" class="chips groups"></div>
+    <input id="mailTo" class="inp" dir="ltr" placeholder="To: name@company.com; ...">
+    <input id="mailCc" class="inp" dir="ltr" placeholder="Cc">
+    <div class="row wrap tight">
+      <button id="saveGroup" class="btn ghost small" type="button">שמור נמענים כקבוצה</button>
+    </div>
+    <div id="saveGroupBox" class="row hidden">
+      <input id="groupName" class="inp" placeholder="שם הקבוצה">
+      <button id="saveGroupYes" class="btn small" type="button">שמור</button>
+    </div>
+
+    <label class="fld" for="mailSubject">נושא</label>
+    <input id="mailSubject" class="inp" dir="ltr">
+
+    <button id="mailBuild" class="btn primary wide">הכן מייל</button>
+    <div id="mailPreview"></div>
+  </details>
+
+  <!-- rules -->
+  <section class="card muted-card">
+    <div class="card-head">
+      <span class="step ghost-step">⚙</span>
+      <h2>קובץ הכללים</h2>
+    </div>
+    <p class="hint" id="rulesSource"></p>
+    <div id="rulesErrors"></div>
+    <div class="row wrap">
+      <button id="reloadRules" class="btn ghost">טען מחדש</button>
+      <label class="btn ghost">
+        טען קובץ מהמחשב
+        <input id="localRules" type="file" accept=".txt,text/plain" hidden>
+      </label>
+      <button id="useGithub" class="btn ghost hidden">חזור לקובץ מ-GitHub</button>
+    </div>
+    <details class="rules-text">
+      <summary>הצג את תוכן הקובץ</summary>
+      <pre id="rulesText" dir="ltr"></pre>
+    </details>
+  </section>
+
+  <div id="status" class="status hidden" role="status"><span class="spinner"></span><span id="statusText"></span></div>
+
+  <script src="taskpane.js"></script>
+</body>
+</html>

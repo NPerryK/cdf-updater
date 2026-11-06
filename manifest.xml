@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CDF Updater - Excel add-in manifest
+  לפני ההתקנה: החלף את NPerryK בשם המשתמש שלך ב-GitHub (Ctrl+H בפנקס רשימות).
+  אם קראת למאגר בשם אחר מ-cdf-updater, החלף גם אותו.
+-->
+<OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+           xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+           xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
+           xsi:type="TaskPaneApp">
+  <Id>443ba6b7-7628-4682-963a-5f8f2b7daeee</Id>
+  <Version>1.0.0.0</Version>
+  <ProviderName>Niv Perry</ProviderName>
+  <DefaultLocale>en-US</DefaultLocale>
+  <DisplayName DefaultValue="CDF Updater"/>
+  <Description DefaultValue="ייבוא גיליונות והרצת כללי עדכון CDF מקובץ טקסט"/>
+  <IconUrl DefaultValue="https://NPerryK.github.io/cdf-updater/assets/icon-32.png"/>
+  <HighResolutionIconUrl DefaultValue="https://NPerryK.github.io/cdf-updater/assets/icon-64.png"/>
+  <SupportUrl DefaultValue="https://NPerryK.github.io/cdf-updater/"/>
+  <AppDomains>
+    <AppDomain>https://NPerryK.github.io</AppDomain>
+  </AppDomains>
+  <Hosts>
+    <Host Name="Workbook"/>
+  </Hosts>
+  <Requirements>
+    <Sets DefaultMinVersion="1.1">
+      <Set Name="ExcelApi" MinVersion="1.7"/>
+    </Sets>
+  </Requirements>
+  <DefaultSettings>
+    <SourceLocation DefaultValue="https://NPerryK.github.io/cdf-updater/taskpane.html"/>
+  </DefaultSettings>
+  <Permissions>ReadWriteDocument</Permissions>
+
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <Hosts>
+      <Host xsi:type="Workbook">
+        <DesktopFormFactor>
+          <GetStarted>
+            <Title resid="GetStarted.Title"/>
+            <Description resid="GetStarted.Description"/>
+            <LearnMoreUrl resid="GetStarted.LearnMoreUrl"/>
+          </GetStarted>
+          <FunctionFile resid="Commands.Url"/>
+          <ExtensionPoint xsi:type="PrimaryCommandSurface">
+            <CustomTab id="CdfUpdater.Tab">
+              <Group id="CdfUpdater.Group">
+                <Label resid="Group.Label"/>
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16x16"/>
+                  <bt:Image size="32" resid="Icon.32x32"/>
+                  <bt:Image size="80" resid="Icon.80x80"/>
+                </Icon>
+                <Control xsi:type="Button" id="CdfUpdater.OpenButton">
+                  <Label resid="Button.Label"/>
+                  <Supertip>
+                    <Title resid="Button.Label"/>
+                    <Description resid="Button.Tooltip"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16"/>
+                    <bt:Image size="32" resid="Icon.32x32"/>
+                    <bt:Image size="80" resid="Icon.80x80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>CdfUpdaterPane</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Url"/>
+                  </Action>
+                </Control>
+              </Group>
+              <Label resid="Tab.Label"/>
+            </CustomTab>
+          </ExtensionPoint>
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
+    <Resources>
+      <bt:Images>
+        <bt:Image id="Icon.16x16" DefaultValue="https://NPerryK.github.io/cdf-updater/assets/icon-16.png"/>
+        <bt:Image id="Icon.32x32" DefaultValue="https://NPerryK.github.io/cdf-updater/assets/icon-32.png"/>
+        <bt:Image id="Icon.80x80" DefaultValue="https://NPerryK.github.io/cdf-updater/assets/icon-80.png"/>
+      </bt:Images>
+      <bt:Urls>
+        <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="https://NPerryK.github.io/cdf-updater/"/>
+        <bt:Url id="Commands.Url" DefaultValue="https://NPerryK.github.io/cdf-updater/commands.html"/>
+        <bt:Url id="Taskpane.Url" DefaultValue="https://NPerryK.github.io/cdf-updater/taskpane.html"/>
+      </bt:Urls>
+      <bt:ShortStrings>
+        <bt:String id="GetStarted.Title" DefaultValue="CDF Updater מוכן"/>
+        <bt:String id="Tab.Label" DefaultValue="CDF"/>
+        <bt:String id="Group.Label" DefaultValue="עדכון CDF"/>
+        <bt:String id="Button.Label" DefaultValue="פתח עדכון"/>
+      </bt:ShortStrings>
+      <bt:LongStrings>
+        <bt:String id="GetStarted.Description" DefaultValue="פתח את הלשונית CDF ולחץ על 'פתח עדכון'."/>
+        <bt:String id="Button.Tooltip" DefaultValue="ייבוא קבצי העדכון והרצת האלגוריתם מקובץ הכללים"/>
+      </bt:LongStrings>
+    </Resources>
+  </VersionOverrides>
+</OfficeApp>
