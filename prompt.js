@@ -70,7 +70,14 @@
   }
 
   function pastePrompt(base) { return build(base).text; }
+
+  // Sent in the same chat when Claude answered in another format: it redoes the answer from the
+  // PDFs that are already in the chat, so nothing has to be uploaded again.
+  function fixupMessage(base) {
+    return "Your previous answer is not in the format I need. Redo it for the same PDFs that are already in " +
+      "this chat, following the instructions below exactly. Reply with only the json code block.\n\n" + build(base).text;
+  }
   function promptVersion(base) { return build(base).version; }
 
-  root.CdfPrompt = { build: build, pastePrompt: pastePrompt, promptVersion: promptVersion, DEFAULT_PROMPT: DEFAULT_PROMPT };
+  root.CdfPrompt = { build: build, pastePrompt: pastePrompt, promptVersion: promptVersion, fixupMessage: fixupMessage, DEFAULT_PROMPT: DEFAULT_PROMPT };
 })(typeof self !== "undefined" ? self : this);

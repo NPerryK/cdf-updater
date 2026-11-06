@@ -276,6 +276,15 @@ test("several CDFs at once: each new one takes the next free row, repeats share 
   assert.strictEqual(t[3].dupOf, 0);
   assert.strictEqual(keys.length, 6, "the sheet's key list is not changed");
 });
+test("a tab-separated row instead of JSON is recognised (Claude used another format)", () => {
+  const row = "A330-1-973\tOpen\t05 Nov 2026\tC1039\t43075600\t330-25-23-JC855-001-SM\t330-25-23-JC855\tA\t-\tINSTL - CEILING FR41 - FR53.3 [MCC]\tC41-C53.3, Y1047.8 / -1047.8\tShort edge margin";
+  const r = E.parseAiPaste(row);
+  assert.strictEqual(r.kind, "table");
+  assert.ok(/table row/.test(r.error));
+  assert.strictEqual(E.parseAiPaste("```\n" + row + "\n```").kind, "table", "also inside a code block");
+  assert.strictEqual(E.parseAiPaste('[{"cdf_number":"A330-1-1","description":"A\tB\tC\tD"}]').kind, null, "tabs inside JSON are fine");
+  assert.strictEqual(E.parseAiPaste("A330-1-961 ROUTINE TEXT").kind, "nojson");
+});
 test("prompt_version is kept from the reply", () => {
   const r = E.parseAiPaste('[{"cdf_number":"A330-1-1","prompt_version":"ABC123"},{"cdf_number":"A330-1-2"}]');
   assert.strictEqual(r.items[0].prompt_version, "ABC123");
@@ -295,6 +304,8 @@ test("prompt: version code is stable, changes with the text, and is asked for in
   assert.notStrictEqual(a.version, c.version);
   assert.ok(a.text.includes('prompt_version: always "' + a.version + '"') && a.text.includes('"prompt_version": "' + a.version + '"'));
   assert.ok(a.text.includes("UPPERCASE English") && a.text.includes("OUTPUT FORMAT"));
+  const fix = P.fixupMessage(base);
+  assert.ok(fix.startsWith("Your previous answer is not in the format") && fix.includes(a.text), "fix-up message carries the full instructions");
 });
 
 console.log("email + reports");

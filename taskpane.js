@@ -782,7 +782,8 @@
       .then(function (r) { return r.ok ? r.text() : null; })
       .catch(function () { return null; })
       .then(function (t) {
-        state.prompt = CdfPrompt.build(t && t.trim() ? t : CdfPrompt.DEFAULT_PROMPT);
+        state.promptBase = t && t.trim() ? t : CdfPrompt.DEFAULT_PROMPT;
+        state.prompt = CdfPrompt.build(state.promptBase);
         renderProject();
         return state.prompt;
       });
@@ -912,7 +913,8 @@
     if (res.error) {
       $("pasteBox").classList.remove("read");
       $("pasteMsg").textContent = "";
-      showNewRowNote(res.error, "bad");
+      if (res.kind === "empty" || res.kind === "cut") showNewRowNote(res.error, "bad");
+      else showFormatHelp(res);
       return;
     }
     state.draft = null; state.queue = []; state.written = [];
@@ -924,6 +926,41 @@
       $("pasteMsg").textContent = "Read ✓ " + items.length + " CDF" + (items.length > 1 ? "s" : "");
       if (items.length === 1) { state.queue = items; state.queueTotal = 1; nextInQueue(); }
       else planBatch(items);
+    });
+  }
+
+  // Claude answered in another format (a table row, plain text, broken JSON): say why, and offer
+  // a message that makes it redo the answer in the same chat + the instructions for next time.
+  function showFormatHelp(res) {
+    var p = loadProject(), inProject = !!p.url;
+    var html = '<div class="note bad fix"><b>' + esc(res.error) + "</b>" +
+      '<p class="fix-why">' + (inProject
+        ? "Usually the project's instructions are missing or are older ones, or the chat was started outside the project."
+        : "Usually the prompt wasn't pasted into the chat, or only part of it was.") + "</p>" +
+      '<div class="fix-step"><span class="fix-n">Now</span><div>' +
+        '<button id="copyFixup" class="btn small" type="button"><svg class="ico"><use href="#i-copy"/></svg>Copy a fix-up message</button>' +
+        '<p>Paste it in the same chat. Claude redoes the answer from the PDFs already there — no need to upload them again.</p></div></div>' +
+      (inProject
+        ? '<div class="fix-step"><span class="fix-n">Next time</span><div>' +
+            '<button id="copyFixInstr" class="btn small" type="button"><svg class="ico"><use href="#i-copy"/></svg>Copy project instructions</button>' +
+            "<p>In the project: Instructions → select all → paste → Save. Replace everything that was there, then start a new chat in the project.</p></div></div>"
+        : "") +
+      '<div id="fixMsg" class="msg"></div></div>';
+    $("newRowForm").innerHTML = html;
+    $("copyFixup").addEventListener("click", function () {
+      fetchPrompt().then(function () {
+        return copyText(CdfPrompt.fixupMessage(state.promptBase));
+      }).then(function (ok) {
+        var m = $("fixMsg"); m.className = ok ? "msg ok" : "msg bad";
+        m.textContent = ok ? "Copied ✓ — paste it in the chat, send, then copy the new code block here." : "Copy failed here — click the button again.";
+      });
+    });
+    var ci = $("copyFixInstr");
+    if (ci) ci.addEventListener("click", function () {
+      $("projectSetup").open = true;
+      copyInstructions(ci);
+      var m = $("fixMsg"); m.className = "msg ok";
+      m.textContent = "Instructions copied ✓ — replace the project's instructions with them.";
     });
   }
 

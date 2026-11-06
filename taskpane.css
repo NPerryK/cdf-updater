@@ -300,6 +300,15 @@ textarea.paste.read { border-color: #9ed3b7; border-style: solid; background: va
 .kv dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
 .code { font-family: var(--display); font-weight: 600; letter-spacing: .05em; font-variant-numeric: tabular-nums; }
 
+/* reply in the wrong format */
+.note.fix b { display: block; line-height: 1.45; }
+.fix-why { margin: 6px 0 4px; color: var(--ink); }
+.fix-step { display: grid; grid-template-columns: 62px 1fr; gap: 8px; align-items: start; padding-top: 8px; margin-top: 6px; border-top: 1px solid rgba(180,35,24,.18); }
+.fix-n { font-family: var(--display); font-weight: 600; font-size: 12.5px; color: var(--warning); padding-top: 5px; }
+.fix-step .btn { margin-top: 0; }
+.fix-step p { margin: 4px 0 0; color: var(--ink); font-size: 11.5px; line-height: 1.45; }
+.note.fix .msg { margin-top: 8px; }
+
 /* batch overview */
 .batch { margin-top: 12px; }
 .batch-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }

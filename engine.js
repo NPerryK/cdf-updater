@@ -660,28 +660,39 @@
     version: "prompt_version", promptversion: "prompt_version"
   };
 
-  // returns { items: [{main_file, att_file, cdf_number, ..., flags:[]}], error }
+  // A table row (tab-separated) instead of JSON: Claude answered in another format,
+  // usually because it did not get the add-in's instructions.
+  function looksLikeTable(s) {
+    if (/\{\s*"/.test(s)) return false;
+    return s.split(/\r?\n/).some(function (line) { return line.split("\t").length >= 4; });
+  }
+
+  // returns { items: [{main_file, att_file, cdf_number, ..., flags:[]}], error, kind }
+  //   kind (when there is an error): empty | table | nojson | cut | invalid | norows
   function parseAiPaste(text) {
-    var s = String(text || "").replace(/^﻿/, "").trim();
-    if (!s) return { items: [], error: "Nothing was pasted" };
+    var s = String(text || "").replace(/^\uFEFF/, "").trim();
+    if (!s) return { items: [], error: "Nothing was pasted", kind: "empty" };
     var fence = /```(?:json|JSON)?\s*([\s\S]*?)```/.exec(s);
     if (fence) s = fence[1].trim();
+    if (looksLikeTable(s)) return { items: [], kind: "table",
+      error: "This reply is a table row (columns separated by tabs), not the JSON block the add-in reads. Claude answered in another format - it did not get the add-in's instructions." };
     var a = s.indexOf("["), o = s.indexOf("{");
     var start = a < 0 ? o : o < 0 ? a : Math.min(a, o);
-    if (start < 0) return { items: [], error: "No JSON found. Copy the code block from Claude's reply (the Copy button in the corner of the block)." };
+    if (start < 0) return { items: [], kind: "nojson", error: "No JSON found. Copy the code block from Claude's reply (the Copy button in the corner of the block)." };
     var close = s.charAt(start) === "[" ? "]" : "}";
     var end = s.lastIndexOf(close);
-    if (end < start) return { items: [], error: "The JSON is cut off — make sure you copied the whole block" };
+    if (end < start) return { items: [], kind: "cut", error: "The JSON is cut off — make sure you copied the whole block" };
     var body = s.slice(start, end + 1), data = null;
     var attempts = [
       body,
       body.replace(/[“”„‟″]/g, '"').replace(/[‘’]/g, "'"),
     ];
     attempts.push(attempts[1].replace(/,\s*([\]}])/g, "$1"));
+    attempts.push(attempts[2].replace(/[\t\r\n]+/g, " "));   // raw tabs / line breaks inside strings
     for (var i = 0; i < attempts.length && data === null; i++) {
       try { data = JSON.parse(attempts[i]); } catch (e) { data = null; }
     }
-    if (data === null) return { items: [], error: "The JSON is not valid. Ask Claude: \"Return only the JSON block again\"." };
+    if (data === null) return { items: [], kind: "invalid", error: "The JSON is not valid - Claude's reply is not in the format the add-in reads." };
     var list = Array.isArray(data) ? data : (data && Array.isArray(data.rows) ? data.rows : [data]);
     var items = [];
     list.forEach(function (raw) {
@@ -700,8 +711,8 @@
       PASTE_KEYS.forEach(function (k) { if (it[k] == null) it[k] = ""; });
       if (it.cdf_number || it.main_file || it.description) items.push(it);
     });
-    if (!items.length) return { items: [], error: "No CDF rows found in the reply" };
-    return { items: items, error: null };
+    if (!items.length) return { items: [], kind: "norows", error: "No CDF rows found in the reply" };
+    return { items: items, error: null, kind: null };
   }
 
   // ---------- reports ----------
