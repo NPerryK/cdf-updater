@@ -13,15 +13,17 @@
   var FIELD_DOCS = {
     main_file: "file name of the CDF form PDF exactly as uploaded",
     att_file: "file name of the ATT PDF for the same CDF exactly as uploaded, or \"\" if there is none",
-    cdf_number: "CDF number exactly as printed, including revision suffix",
+    cdf_number: "CDF number exactly as printed, including the revision suffix (.- or .A)",
     form_date: "Date printed on the form, dd/mm/yyyy, or empty",
     priority: "Priority as printed (ROUTINE, URGENT, AOG...)",
     description: "UPPERCASE English summary following the style rules",
-    oem_category: "OEM category (OEM STRUCTURE / OEM AVIONICS...) or empty",
-    drawing_number: "Drawing / installation number referenced",
-    installation: "Installation title as printed",
-    code: "Short code printed on the form (e.g. C0123)",
-    initiator: "Name of the person who raised / owns the CDF"
+    oem_category: "OEM category (OEM STRUCTURE / OEM AVIONICS / OEM SYSTEMS...) or empty",
+    drawing_number: "The drawing number as printed (the one ending in -001-SM, -001-AV ...)",
+    installation: "The drawing title as printed (e.g. INSTL - ...)",
+    code: "The NRC code printed on the form (a letter + 4 digits, e.g. C0123)",
+    drawing_rev: "Revision letter of that drawing as printed (A, B ...), or - if none",
+    author: "Name of the CDF author / initiator; if a phone number is printed for that person, add it after a line break (\\n)",
+    technical_adviser: "Name of the technical adviser on the form, with the phone number after a line break if printed; empty if none"
   };
 
   var DEFAULT_PROMPT =

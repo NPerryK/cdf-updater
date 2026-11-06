@@ -20,6 +20,9 @@ function row(obj, width = 30) {
 }
 
 const rules = E.parseRules(fs.readFileSync(path.join(__dirname, "..", "rules.txt"), "utf8"));
+// a NEWROW spec that also writes the PDF links (the real rules.txt leaves A and B to the prepared rows)
+const linkRows = E.parseRules('NEWROW_KEY C\nNEWROW_START_ROW 2\nNEWROW A = LINK ATT ""\nNEWROW B = LINK MAIN ""\nNEWROW C = CDF\nNEWROW F = TODAY\n' +
+  'NEWROW G = AI.PRIORITY\nNEWROW H = AI.DESCRIPTION\nNEWROW I = AI.OEM\nNEWROW J = AI.DRAWING\nNEWROW K = AI.INSTALLATION\nNEWROW L = AI.CODE\nNEWROW M = "-"\nNEWROW O = AI.INITIATOR').newRow;
 const generic = E.parseRules(fs.readFileSync(path.join(__dirname, "generic-rules.txt"), "utf8"));
 const algo = generic.algorithms[0];
 const NOW = new Date(2026, 10, 5, 14, 30, 0); // 05/11/2026
@@ -187,7 +190,8 @@ test("rules.txt NEWROW block parsed", () => {
   assert.strictEqual(nr.startRow, 2);
   assert.strictEqual(nr.cells.length, 12);
   assert.deepStrictEqual(nr.cells.find((c) => c.col === "H").source, { kind: "ai", field: "DESCRIPTION", key: "description" });
-  assert.deepStrictEqual(nr.cells.find((c) => c.col === "A").source, { kind: "link", which: "ATT", prefix: "" });
+  assert.ok(!nr.cells.some((c) => c.col === "A" || c.col === "B"), "the prepared links in A and B are left alone");
+  assert.deepStrictEqual(linkRows.cells.find((c) => c.col === "A").source, { kind: "link", which: "ATT", prefix: "" });
   assert.deepStrictEqual(E.parseRules('AI_MODEL "x"').errors, [], "old AI_MODEL line still accepted");
 });
 test("NEWROW errors", () => {
@@ -196,11 +200,11 @@ test("NEWROW errors", () => {
 });
 test("CDF from file names", () => {
   const t = (n) => E.parseCdfFileName(n);
-  assert.deepStrictEqual(t("A330-1-961.-.pdf"), { cdf: "A330-1-961", isAtt: false });
-  assert.deepStrictEqual(t("A330-1-961.-ATT.pdf"), { cdf: "A330-1-961", isAtt: true });
-  assert.deepStrictEqual(t("A330-1-682.A.pdf"), { cdf: "A330-1-682.A", isAtt: false });
-  assert.deepStrictEqual(t("A330-1-682.A-ATT.pdf"), { cdf: "A330-1-682.A", isAtt: true });
-  assert.deepStrictEqual(t("A330-1-682.AATT.pdf"), { cdf: "A330-1-682.A", isAtt: true });
+  assert.deepStrictEqual(t("A330-1-961.-.pdf"), { cdf: "A330-1-961", printed: "A330-1-961.-", isAtt: false });
+  assert.deepStrictEqual(t("A330-1-961.-ATT.pdf"), { cdf: "A330-1-961", printed: "A330-1-961.-", isAtt: true });
+  assert.deepStrictEqual(t("A330-1-682.A.pdf"), { cdf: "A330-1-682.A", printed: "A330-1-682.A", isAtt: false });
+  assert.deepStrictEqual(t("A330-1-682.A-ATT.pdf"), { cdf: "A330-1-682.A", printed: "A330-1-682.A", isAtt: true });
+  assert.deepStrictEqual(t("A330-1-682.AATT.pdf"), { cdf: "A330-1-682.A", printed: "A330-1-682.A", isAtt: true });
   assert.strictEqual(t("scan.pdf").cdf, null);
   assert.strictEqual(E.normalizeCdf("a330-1-961.-"), "A330-1-961");
 });
@@ -209,7 +213,7 @@ const ai = {
   oem_category: "OEM STRUCTURE", drawing_number: "DWG-1", installation: "INSTL - TEST", code: "C1025", initiator: "Test Person", flags: [],
 };
 test("buildNewRowCells fills every mapped column", () => {
-  const b = E.buildNewRowCells(rules.newRow, { ai, mainName: "A330-1-961.-.pdf", attName: "A330-1-961.-ATT.pdf", now: NOW });
+  const b = E.buildNewRowCells(linkRows, { ai, mainName: "A330-1-961.-.pdf", attName: "A330-1-961.-ATT.pdf", now: NOW });
   const by = Object.fromEntries(b.cells.map((c) => [c.col, c]));
   assert.strictEqual(b.cdf, "A330-1-961");
   assert.deepStrictEqual(b.warnings, []);
@@ -221,9 +225,9 @@ test("buildNewRowCells fills every mapped column", () => {
   assert.deepStrictEqual(by.B.link, { address: "A330-1-961.-.pdf", textToDisplay: "A330-1-961.-.pdf" });
 });
 test("buildNewRowCells warns on mismatched files and handles missing ATT", () => {
-  const b = E.buildNewRowCells(rules.newRow, { ai: { ...ai, cdf_number: "A330-1-962" }, mainName: "A330-1-961.-.pdf", attName: "A330-1-700.-ATT.pdf", now: NOW });
+  const b = E.buildNewRowCells(linkRows, { ai: { ...ai, cdf_number: "A330-1-962" }, mainName: "A330-1-961.-.pdf", attName: "A330-1-700.-ATT.pdf", now: NOW });
   assert.strictEqual(b.warnings.length, 2);
-  const noAtt = E.buildNewRowCells(rules.newRow, { ai, mainName: "A330-1-961.-.pdf", attName: null, now: NOW });
+  const noAtt = E.buildNewRowCells(linkRows, { ai, mainName: "A330-1-961.-.pdf", attName: null, now: NOW });
   assert.strictEqual(noAtt.cells.find((c) => c.col === "A").link, null);
 });
 test("findNewRowTarget: existing row vs append after last", () => {
@@ -264,7 +268,7 @@ test("clear errors for empty / non-JSON / broken / unrelated JSON", () => {
 });
 test("pasted item -> row cells use the file names for CDF and links", () => {
   const it = E.parseAiPaste('[{"main_file":"A330-1-961.-.pdf","att_file":"A330-1-961.-ATT.pdf","cdf_number":"A330-1-961.-","priority":"ROUTINE"}]').items[0];
-  const b = E.buildNewRowCells(rules.newRow, { ai: it, mainName: it.main_file, attName: it.att_file, now: NOW });
+  const b = E.buildNewRowCells(linkRows, { ai: it, mainName: it.main_file, attName: it.att_file, now: NOW });
   assert.strictEqual(b.cdf, "A330-1-961");
   assert.strictEqual(b.cells.find((c) => c.col === "A").link.address, "A330-1-961.-ATT.pdf");
   assert.strictEqual(b.cells.find((c) => c.col === "G").value, "ROUTINE");
@@ -284,6 +288,52 @@ test("a tab-separated row instead of JSON is recognised (Claude used another for
   assert.strictEqual(E.parseAiPaste("```\n" + row + "\n```").kind, "table", "also inside a code block");
   assert.strictEqual(E.parseAiPaste('[{"cdf_number":"A330-1-1","description":"A\tB\tC\tD"}]').kind, null, "tabs inside JSON are fine");
   assert.strictEqual(E.parseAiPaste("A330-1-961 ROUTINE TEXT").kind, "nojson");
+});
+// a sheet like the real CDF sheet: C = key, B = prepared CDF numbers (rows for future CDFs)
+//  row: 1 hdr | 2 A-001 | 3 (solution) | 4 A-002 | 5 A-002.A | 6 (solution) | 7 A-003 | 8 prep 004 | 9 prep 005 | 10 prep 006
+const KEYS  = ["LINK TO GCC", "A330-1-001.-", "", "A330-1-002.-", "A330-1-002.A", "", "A330-1-003.-", "", "", ""];
+const MATCH = ["LINK TO GCC FILE", "A330-1-001.-", "", "A330-1-002.-", "", "", "A330-1-003.-", "A330-1-004.-", "A330-1-005.-", "A330-1-006.-"];
+test("target: existing / prepared row / revision insert / end", () => {
+  const f = (cdf) => E.findNewRowTarget(KEYS, 2, cdf, MATCH);
+  assert.deepStrictEqual(f("A330-1-002.-"), { row: 4, existing: true });
+  assert.deepStrictEqual(f("A330-1-002"), { row: 4, existing: true }, "with or without .-");
+  assert.deepStrictEqual(f("A330-1-005.-"), { row: 9, existing: false, prepared: true }, "the row prepared for 005, not the next free one");
+  assert.deepStrictEqual(f("A330-1-001.A"), { row: 4, existing: false, insert: true, after: "A330-1-001.-" }, "after 001 and its solution row");
+  assert.deepStrictEqual(f("A330-1-002.B"), { row: 7, existing: false, insert: true, after: "A330-1-002.A" }, "after the last revision's block");
+  assert.deepStrictEqual(f("A330-1-099.-"), { row: 11, existing: false }, "no prepared row -> after the last used row");
+  assert.deepStrictEqual(E.findNewRowTarget(KEYS, 2, "A330-1-099.A", MATCH), { row: 11, existing: false }, "revision of an unknown CDF -> end");
+});
+test("batch: rows shift under an inserted row; writeRow follows the order of writing", () => {
+  const t = E.planNewRowTargets({ keys: KEYS, match: MATCH }, 2, ["A330-1-005.-", "A330-1-001.A", "A330-1-004.-", "A330-1-001.B"]);
+  // 005: prepared row 9, written first; two rows are inserted above it later -> ends in row 11
+  // 001.A: inserted at row 4 (after 001 + its solution row)
+  // 004: prepared row 8, which is row 9 by then (after the first insert); ends in row 10
+  // 001.B: inserted after 001.A -> row 5
+  assert.deepStrictEqual(t.map((x) => [x.writeRow, x.row, !!x.prepared, !!x.insert]),
+    [[9, 11, true, false], [4, 4, false, true], [9, 10, true, false], [5, 5, false, true]]);
+  assert.strictEqual(t[3].after, "A330-1-001.A", "001.B goes after 001.A");
+});
+test("CDF FULL / CDF REV and the new AI fields", () => {
+  const r = E.parseRules('NEWROW_SHEET "CDF"\nNEWROW_KEY C\nNEWROW_MATCH B\nNEWROW_START_ROW 2\nNEWROW C = CDF FULL\nNEWROW D = CDF REV\nNEWROW M = AI.DWG_REV\nNEWROW N = AI.AUTHOR\nNEWROW O = AI.ADVISER\nNEWROW P = AI.INITIATOR');
+  assert.deepStrictEqual(r.errors, []);
+  assert.strictEqual(r.newRow.match.col, "B");
+  const it = E.parseAiPaste('[{"cdf_number":"A330-1-973.-","drawing_rev":"A","initiator":"Name A\\n050-1","technical_adviser":"Name B"}]').items[0];
+  assert.strictEqual(it.author, "Name A\n050-1", "initiator is read as author");
+  const b = E.buildNewRowCells(r.newRow, { ai: it, now: NOW });
+  const v = Object.fromEntries(b.cells.map((c) => [c.col, c.value]));
+  assert.deepStrictEqual(v, { C: "A330-1-973.-", D: "-", M: "A", N: "Name A\n050-1", O: "Name B", P: "Name A\n050-1" });
+  const rv = E.buildNewRowCells(r.newRow, { ai: { cdf_number: "a330-1-682.a" }, now: NOW });
+  assert.strictEqual(rv.cells[0].value, "A330-1-682.A"); assert.strictEqual(rv.cells[1].value, "A");
+  const fromFile = E.buildNewRowCells(r.newRow, { ai: {}, mainName: "A330-1-961.-.pdf", now: NOW });
+  assert.strictEqual(fromFile.cells[0].value, "A330-1-961.-", "from the file name when the form number is missing");
+});
+test("rules.txt: the new row follows the CDF sheet header", () => {
+  const r = E.parseRules(fs.readFileSync(path.join(__dirname, "..", "rules.txt"), "utf8"));
+  assert.deepStrictEqual(r.errors, []);
+  const m = Object.fromEntries(r.newRow.cells.map((c) => [c.col, c.source.kind === "ai" ? "AI." + c.source.field : c.source.kind]));
+  assert.deepStrictEqual(m, { C: "cdf_full", D: "cdf_rev", F: "today", G: "AI.PRIORITY", H: "AI.DESCRIPTION", I: "AI.OEM", J: "AI.DRAWING",
+    K: "AI.INSTALLATION", L: "AI.CODE", M: "AI.DWG_REV", N: "AI.AUTHOR", O: "AI.ADVISER" });
+  assert.strictEqual(r.newRow.sheet.name, "CDF"); assert.strictEqual(r.newRow.match.col, "B");
 });
 test("prompt_version is kept from the reply", () => {
   const r = E.parseAiPaste('[{"cdf_number":"A330-1-1","prompt_version":"ABC123"},{"cdf_number":"A330-1-2"}]');

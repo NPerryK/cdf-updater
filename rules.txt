@@ -66,37 +66,49 @@ SUPPLIER "IAI"     = "IAI"
 
 # ---------------- New CDF row (from a PDF pair) ----------------
 # Claude fills the fields from the CDF PDF and the ATT PDF (via claude.ai, copy-paste),
-# and you review the form and approve. If the CDF already exists in the key column, its row
-# is updated; otherwise a new row is added after the last one.
+# and you review the form and approve. Where each CDF goes is explained below (NEWROW_MATCH).
 #
 # Possible sources for each column:
-#   CDF              the CDF number (from the file name, checked against the form)
+#   CDF              the CDF number without ".-" (A330-1-973)
+#   CDF FULL         the CDF number as printed (A330-1-973.- / A330-1-682.A)
+#   CDF REV          the CDF revision: "-" or the letter (A, B ...)
 #   TODAY / NOW      today's date / date and time
 #   "text"           a fixed value
-#   AI.<FIELD>       DATE  PRIORITY  DESCRIPTION  OEM  DRAWING  INSTALLATION  CODE  INITIATOR
+#   AI.<FIELD>       DATE  PRIORITY  DESCRIPTION  OEM  DRAWING  INSTALLATION  CODE  DWG_REV  AUTHOR  ADVISER
 #   LINK MAIN "<folder>"   link to the CDF PDF (folder + file name)
 #   LINK ATT  "<folder>"   link to the ATT PDF
 #
-# Column letters follow the CDF column map of the algorithm (00.1). The pane also shows, next to
-# every field, the header of the column it will be written to.
+# The pane shows, next to every field, the header of the column it will be written to.
 
-NEWROW_SHEET FIRST
+NEWROW_SHEET "CDF"
 NEWROW_KEY C
 NEWROW_HEADER_ROW 1
 NEWROW_START_ROW 2
 
-NEWROW A = LINK ATT ""        # <- put the folder of the PDF files between the quotes
-NEWROW B = LINK MAIN ""
-NEWROW C = CDF
-NEWROW F = TODAY
-NEWROW G = AI.PRIORITY
-NEWROW H = AI.DESCRIPTION
-NEWROW I = AI.OEM
-NEWROW J = AI.DRAWING
-NEWROW K = AI.INSTALLATION
-NEWROW L = AI.CODE
-NEWROW M = "-"
-NEWROW O = AI.INITIATOR
+# Where a new CDF goes:
+#  - already in column C            -> that row is updated
+#  - a prepared row (column B already holds the CDF number and the PDF links, C is empty)
+#                                   -> that row (NEWROW_MATCH = the column of the prepared numbers)
+#  - a revision (.A, .B) of a CDF   -> a new row inserted right after the original CDF's block
+#  - none of these                  -> a new row after the last used row
+NEWROW_MATCH B
+
+# Columns follow the header row of sheet CDF. A and B (links to the PDFs) are already in the
+# prepared rows, so the add-in doesn't touch them. To have it write links, add for example:
+#   NEWROW A = LINK ATT "<folder of the PDFs>\"
+#   NEWROW B = LINK MAIN "<folder of the PDFs>\"
+NEWROW C = CDF FULL           # LINK TO GCC        - the CDF number as printed, e.g. A330-1-973.-
+NEWROW D = CDF REV            # CDF REVISION       - "-", or the revision letter (A, B ...)
+NEWROW F = TODAY              # RECEIVED DATE
+NEWROW G = AI.PRIORITY        # PRIORITY
+NEWROW H = AI.DESCRIPTION     # PROBLEM DESCRIPTION
+NEWROW I = AI.OEM             # TAGS
+NEWROW J = AI.DRAWING         # DWG.
+NEWROW K = AI.INSTALLATION    # DWG. Name
+NEWROW L = AI.CODE            # NRC
+NEWROW M = AI.DWG_REV         # CDF DWG REV
+NEWROW N = AI.AUTHOR          # AUTHOR
+NEWROW O = AI.ADVISER         # TECHNICAL ADVISER
 
 # The instructions Claude gets are in ai-prompt.txt - you can edit them.
 

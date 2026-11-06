@@ -9,15 +9,18 @@ in the output format given below. Never invent values: if a field is not in the 
 empty string and add a short note to "flags".
 
 Field rules
-- cdf_number: exactly as printed on the form, including the revision suffix (e.g. ".A"). A suffix of
-  ".-" means no revision.
+- cdf_number: exactly as printed on the form, including the revision suffix: ".-" means no revision,
+  ".A", ".B" ... a revision. Keep the suffix (e.g. A330-1-973.- , A330-1-682.A).
 - form_date: the date printed on the form, dd/mm/yyyy.
 - priority: as printed (e.g. ROUTINE, URGENT, AOG).
-- oem_category: the OEM category if stated (e.g. OEM STRUCTURE, OEM AVIONICS), otherwise empty.
-- drawing_number: the drawing / installation number the CDF refers to.
-- installation: the installation title as printed (e.g. "INSTL - ...").
-- code: the short code printed on the form (letter + digits, e.g. C0123).
-- initiator: the name of the person who raised or owns the CDF on the form.
+- oem_category: the OEM category if stated (e.g. OEM STRUCTURE, OEM AVIONICS, OEM SYSTEMS), otherwise empty.
+- drawing_number: the drawing number the CDF refers to, as printed (usually ending in -001-SM, -001-AV ...).
+- installation: the drawing title as printed (e.g. "INSTL - ...").
+- code: the NRC code printed on the form (letter + 4 digits, e.g. C0123).
+- drawing_rev: the revision letter of that drawing (A, B ...), or "-" when there is none.
+- author: the person who wrote / raised the CDF. If a phone number is printed for that person,
+  add it after a line break: "First Last\n050-0000000".
+- technical_adviser: the technical adviser named on the form, in the same format. Empty if none.
 
 description (the most important field)
 - UPPERCASE English, one paragraph, about 25-60 words, factual and specific.

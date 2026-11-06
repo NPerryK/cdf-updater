@@ -185,7 +185,8 @@
   var AI_FIELDS = {
     CDF: "cdf_number", DATE: "form_date", PRIORITY: "priority", DESCRIPTION: "description",
     OEM: "oem_category", DRAWING: "drawing_number", INSTALLATION: "installation",
-    CODE: "code", INITIATOR: "initiator"
+    CODE: "code", DWG_REV: "drawing_rev", AUTHOR: "author", ADVISER: "technical_adviser",
+    INITIATOR: "author"   // old name of AUTHOR
   };
 
   function parseColumnLetter(cur) {
@@ -201,7 +202,11 @@
     if (t.t === "str") { cur.next(); return { kind: "text", v: t.v }; }
     if (t.t === "num") { cur.next(); return { kind: "num", v: t.v }; }
     var w = cur.word();
-    if (w === "CDF") return { kind: "cdf" };
+    if (w === "CDF") {
+      if (cur.isWord("FULL")) { cur.next(); return { kind: "cdf_full" }; }   // as printed: A330-1-973.- / A330-1-682.A
+      if (cur.isWord("REV")) { cur.next(); return { kind: "cdf_rev" }; }     // revision letter: - / A
+      return { kind: "cdf" };                                                 // without ".-": A330-1-973
+    }
     if (w === "TODAY" || w === "NOW") return { kind: w.toLowerCase() };
     if (w === "LINK") {
       var which = cur.word();
@@ -215,7 +220,7 @@
       if (!AI_FIELDS[f]) throw new Error("Unknown AI field: " + f + ". Available: " + Object.keys(AI_FIELDS).join(", "));
       return { kind: "ai", field: f, key: AI_FIELDS[f] };
     }
-    throw new Error("Unknown source: " + w + " (allowed: CDF, TODAY, NOW, \"text\", AI.<FIELD>, LINK MAIN/ATT)");
+    throw new Error("Unknown source: " + w + " (allowed: CDF, CDF FULL, CDF REV, TODAY, NOW, \"text\", AI.<FIELD>, LINK MAIN/ATT)");
   }
 
   function parseSheetSpec(cur) {
@@ -226,7 +231,7 @@
   function parseRules(text) {
     var result = {
       imports: [], algorithms: [], log: "UPDATE LOG", errors: [],
-      newRow: { sheet: { first: true, name: null }, startRow: null, headerRow: 1, key: null, cells: [] },
+      newRow: { sheet: { first: true, name: null }, startRow: null, headerRow: 1, key: null, match: null, cells: [] },
       emailGroups: [], reports: [],
       cdfAlgorithm: null, claudeProject: null,
       cdfConfig: { stations: {}, suppliers: {}, finalApprovalSigner: null, pendingTables: [], duplicates: [] }
@@ -314,6 +319,7 @@
           case "NEWROW_START_ROW": { result.newRow.startRow = cur.int(); cur.end(); break; }
           case "NEWROW_HEADER_ROW": { result.newRow.headerRow = cur.int(); cur.end(); break; }
           case "NEWROW_KEY": { result.newRow.key = parseColumnLetter(cur); cur.end(); break; }
+          case "NEWROW_MATCH": { result.newRow.match = parseColumnLetter(cur); cur.end(); break; }
           case "NEWROW": {
             var c = parseColumnLetter(cur); cur.op("="); var src = parseNewRowSource(cur); cur.end();
             if (result.newRow.cells.some(function (x) { return x.idx === c.idx; })) throw new Error("Column " + c.col + " is already defined for the new row");
@@ -558,10 +564,11 @@
     var base = String(name || "").replace(/\.pdf$/i, "").trim();
     var isAtt = /ATT/i.test(base);
     var core = base.replace(/[-_ ]?ATT\b.*$/i, "").replace(/[-_ ]?ATT$/i, "");
+    if (/\d\.$/.test(core)) core += "-";   // "A330-1-961.-ATT": the "-" before ATT is the revision
     var m = /([A-Z]\d{3}-\d+-\d+)(?:\.([A-Z]{1,2}|-)?)?$/i.exec(core) || /([A-Z]\d{3}-\d+-\d+)(?:\.([A-Z](?![A-Z])|-))?/i.exec(core);
-    if (!m) return { cdf: null, isAtt: isAtt };
+    if (!m) return { cdf: null, printed: null, isAtt: isAtt };
     var rev = m[2] && m[2] !== "-" ? m[2].toUpperCase() : null;
-    return { cdf: m[1].toUpperCase() + (rev ? "." + rev : ""), isAtt: isAtt };
+    return { cdf: m[1].toUpperCase() + (rev ? "." + rev : ""), printed: m[1].toUpperCase() + (m[2] ? "." + m[2].toUpperCase() : ""), isAtt: isAtt };
   }
 
   function normalizeCdf(s) {
@@ -586,15 +593,25 @@
    * opts: { ai: {cdf_number, ...}, mainName, attName, now, dateFormat }
    * returns { cdf, cells:[{col, idx, label, value, display, format, link}], warnings:[] }
    */
+  // "A330-1-973.-" -> "-" ; "A330-1-682.A" -> "A"
+  function cdfRevision(printed) {
+    var m = /\.([A-Z]{1,2})$/.exec(normalizeCdf(printed));
+    return m ? m[1] : "-";
+  }
+
   function buildNewRowCells(newRow, opts) {
     var ai = opts.ai || {}, warnings = [];
-    var fromFile = parseCdfFileName(opts.mainName).cdf;
+    var file = parseCdfFileName(opts.mainName), fromFile = file.cdf;
     var fromAi = ai.cdf_number ? normalizeCdf(ai.cdf_number) : null;
     var cdf = fromFile || fromAi || "";
     if (fromFile && fromAi && normalizeCdf(fromFile) !== fromAi) {
       warnings.push("The CDF number in the file name (" + fromFile + ") differs from the one on the form (" + fromAi + ")");
     }
     if (!cdf) warnings.push("No CDF number found — fill it in manually");
+    var printedAi = ai.cdf_number ? String(ai.cdf_number).trim().toUpperCase().replace(/\s+/g, "") : "";
+    var cdfFull = printedAi && /\.([A-Z]{1,2}|-)$/.test(printedAi) ? printedAi
+      : file.printed && /\.([A-Z]{1,2}|-)$/.test(file.printed) ? file.printed
+      : cdf ? (/\.[A-Z]{1,2}$/.test(cdf) ? cdf : cdf + ".-") : "";
     if (opts.attName) {
       var attCdf = parseCdfFileName(opts.attName).cdf;
       if (attCdf && cdf && normalizeCdf(attCdf) !== normalizeCdf(cdf)) warnings.push("The ATT file (" + attCdf + ") does not belong to " + cdf);
@@ -604,6 +621,8 @@
       var s = c.source, out = { col: c.col, idx: c.idx, kind: s.kind, value: "", display: "", format: null, link: null, label: "" };
       switch (s.kind) {
         case "cdf": out.value = cdf; out.label = "CDF"; break;
+        case "cdf_full": out.value = cdfFull; out.label = "CDF as printed"; break;
+        case "cdf_rev": out.value = cdfFull ? cdfRevision(cdfFull) : ""; out.label = "CDF revision"; break;
         case "text": out.value = s.v; out.label = "Fixed"; break;
         case "num": out.value = s.v; out.label = "Fixed"; break;
         case "today": out.value = dateToSerial(opts.now || new Date(), false); out.format = fmt; out.label = "Today's date"; break;
@@ -619,44 +638,89 @@
       out.display = out.format ? serialToDateString(out.value) : String(out.value);
       return out;
     });
-    return { cdf: cdf, cells: cells, warnings: warnings };
+    return { cdf: cdf, cdfFull: cdfFull, cells: cells, warnings: warnings };
   }
 
-  // keyValues: values of the key column, index 0 = row 1
-  function findNewRowTarget(keyValues, startRow, cdf) {
-    var want = loose(normalizeCdf(cdf)), last = startRow - 2;
-    for (var i = startRow - 1; i < keyValues.length; i++) {
+  // Where a new CDF goes. keyValues / matchValues: the key column (C) and the column of the
+  // prepared rows (B), index 0 = row 1. Returns {row, existing, prepared, insert, after}:
+  //   existing - the CDF is already in the key column: that row is updated
+  //   prepared - an empty row prepared for this CDF (B already holds its number and PDF links)
+  //   insert   - a revision (.A, .B): a new row inserted right after the original CDF's block
+  //   otherwise - a new row after the last used row
+  function findNewRowTarget(keyValues, startRow, cdf, matchValues) {
+    var want = loose(normalizeCdf(cdf)), match = matchValues || [], i;
+    var last = startRow - 2;
+    for (i = startRow - 1; i < keyValues.length; i++) {
       var v = keyValues[i];
       if (isEmpty(v)) continue;
       last = i;
       if (want && loose(normalizeCdf(v)) === want) return { row: i + 1, existing: true };
     }
+    if (want) {
+      for (i = startRow - 1; i < match.length; i++) {
+        if (!isEmpty(match[i]) && isEmpty(keyValues[i]) && loose(normalizeCdf(match[i])) === want) return { row: i + 1, existing: false, prepared: true };
+      }
+    }
+    var rev = /^(.*)\.([A-Z]{1,2})$/.exec(normalizeCdf(cdf));
+    if (rev) {
+      var base = loose(rev[1]), anchor = -1;
+      for (i = startRow - 1; i < keyValues.length; i++) {
+        if (!isEmpty(keyValues[i]) && loose(normalizeCdf(keyValues[i]).replace(/\.[A-Z]{1,2}$/, "")) === base) anchor = i;
+      }
+      if (anchor >= 0) {
+        var n = Math.max(keyValues.length, match.length), j = anchor + 1;
+        while (j < n && isEmpty(keyValues[j]) && isEmpty(match[j])) j++;
+        if (j < n) return { row: j + 1, existing: false, insert: true, after: String(keyValues[anchor]).trim() };
+        return { row: n + 1, existing: false, after: String(keyValues[anchor]).trim() };
+      }
+    }
+    for (i = startRow - 1; i < match.length; i++) if (!isEmpty(match[i]) && i > last) last = i;
     return { row: Math.max(last + 2, startRow), existing: false };
   }
 
-  // Targets for several CDFs written together: each new CDF takes the next free row,
-  // and a CDF that appears twice in the batch goes to the same row (dupOf = index of the first).
-  function assignNewRowTargets(keyValues, startRow, cdfs) {
-    var keys = (keyValues || []).slice(), seen = {};
-    return cdfs.map(function (cdf, i) {
+  // Several CDFs written together, in this order. Each target is found on the sheet as it will be
+  // after the earlier ones were written (a new CDF takes its row; an inserted row pushes the rows
+  // below it down). writeRow = where to write when the earlier ones are done; row = final row.
+  // A CDF that appears twice goes to the same row (dupOf = index of the first).
+  // sheet: { keys, match, rows, formats } - rows/formats (whole rows) are optional
+  function planNewRowTargets(sheet, startRow, cdfs) {
+    var keys = (sheet.keys || []).slice(), match = (sheet.match || []).slice();
+    var rows = sheet.rows ? sheet.rows.slice() : null, fmts = sheet.formats ? sheet.formats.slice() : null;
+    var out = [], seen = {};
+    cdfs.forEach(function (cdf, i) {
       var id = loose(normalizeCdf(cdf));
-      var t = findNewRowTarget(keys, startRow, cdf);
+      var t = findNewRowTarget(keys, startRow, cdf, match);
       if (id && seen[id] != null) t.dupOf = seen[id];
       if (id && seen[id] == null) seen[id] = i;
+      t.writeRow = t.row;
+      t.existingValues = t.insert || !rows ? [] : (rows[t.row - 1] || []).slice();
+      t.existingFormats = t.insert || !fmts ? [] : (fmts[t.row - 1] || []).slice();
+      if (t.insert) {
+        out.forEach(function (o) { if (o.row >= t.row) o.row++; });
+        keys.splice(t.row - 1, 0, ""); match.splice(t.row - 1, 0, "");
+        if (rows) rows.splice(t.row - 1, 0, []); if (fmts) fmts.splice(t.row - 1, 0, []);
+      }
       if (!t.existing) {
         while (keys.length < t.row) keys.push("");
         keys[t.row - 1] = cdf || "(new)";
       }
-      return t;
+      out.push(t);
     });
+    return out;
+  }
+
+  function assignNewRowTargets(keyValues, startRow, cdfs, matchValues) {
+    return planNewRowTargets({ keys: keyValues, match: matchValues }, startRow, cdfs);
   }
 
   // ---------- answer pasted from claude.ai ----------
   var PASTE_KEYS = ["main_file", "att_file", "cdf_number", "form_date", "priority", "description",
-    "oem_category", "drawing_number", "installation", "code", "initiator"];
+    "oem_category", "drawing_number", "installation", "code", "drawing_rev", "author", "technical_adviser"];
   var PASTE_ALIASES = {
     cdf: "cdf_number", cdf_num: "cdf_number", date: "form_date", oem: "oem_category",
-    drawing: "drawing_number", main: "main_file", att: "att_file", attachment: "att_file", owner: "initiator",
+    drawing: "drawing_number", main: "main_file", att: "att_file", attachment: "att_file", owner: "author",
+    initiator: "author", adviser: "technical_adviser", technical_advisor: "technical_adviser",
+    dwg_rev: "drawing_rev", drawing_revision: "drawing_rev",
     version: "prompt_version", promptversion: "prompt_version"
   };
 
@@ -822,6 +886,8 @@
     matchImportSlot: matchImportSlot,
     parseAiPaste: parseAiPaste,
     assignNewRowTargets: assignNewRowTargets,
+    planNewRowTargets: planNewRowTargets,
+    cdfRevision: cdfRevision,
     normalizeCdf: normalizeCdf,
     buildNewRowCells: buildNewRowCells,
     findNewRowTarget: findNewRowTarget,

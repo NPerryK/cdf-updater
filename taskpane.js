@@ -998,50 +998,75 @@
       });
     });
     return newRowSheet(ctx).then(function (ws) {
-      var maxIdx = Math.max.apply(null, nr.cells.map(function (c) { return c.idx; }).concat([nr.key.idx]));
+      var cols = nr.cells.map(function (c) { return c.idx; }).concat([nr.key.idx]);
+      if (nr.match) cols.push(nr.match.idx);
+      var width = Math.max.apply(null, cols) + 1;
       var used = ws.getUsedRangeOrNullObject(true);
       used.load("rowIndex,rowCount");
-      var hdr = ws.getRangeByIndexes(nr.headerRow - 1, 0, 1, maxIdx + 1);
+      var hdr = ws.getRangeByIndexes(nr.headerRow - 1, 0, 1, width);
       hdr.load("values");
       return ctx.sync().then(function () {
         var rows = used.isNullObject ? 0 : used.rowIndex + used.rowCount;
-        var keyRg = rows ? ws.getRangeByIndexes(0, nr.key.idx, rows, 1) : null;
-        if (keyRg) keyRg.load("values");
-        return ctx.sync().then(function () {
-          var keyVals = keyRg ? keyRg.values.map(function (r) { return r[0]; }) : [];
-          var targets = E.assignNewRowTargets(keyVals, nr.startRow, builts.map(function (b) { return b.cdf; }));
-          var rowRgs = targets.map(function (t) {
-            var rg = ws.getRangeByIndexes(t.row - 1, 0, 1, maxIdx + 1);
-            rg.load("values,numberFormat");
-            return rg;
-          });
-          return ctx.sync().then(function () {
-            return {
-              ws: ws, wsName: ws.name, headers: hdr.values[0],
-              entries: items.map(function (item, i) {
-                return { item: item, built: builts[i], target: targets[i], existing: rowRgs[i].values[0], existingFmt: rowRgs[i].numberFormat[0] };
-              })
-            };
-          });
+        var values = [], formats = [], chain = Promise.resolve();
+        for (var r = 0; r < rows; r += 2000) {
+          (function (start) {
+            chain = chain.then(function () {
+              var rg = ws.getRangeByIndexes(start, 0, Math.min(2000, rows - start), width);
+              rg.load("values,numberFormat");
+              return ctx.sync().then(function () {
+                Array.prototype.push.apply(values, rg.values);
+                Array.prototype.push.apply(formats, rg.numberFormat);
+              });
+            });
+          })(r);
+        }
+        return chain.then(function () {
+          var targets = E.planNewRowTargets({
+            keys: values.map(function (v) { return v[nr.key.idx]; }),
+            match: nr.match ? values.map(function (v) { return v[nr.match.idx]; }) : null,
+            rows: values, formats: formats
+          }, nr.startRow, builts.map(function (b) { return b.cdfFull || b.cdf; }));
+          return {
+            ws: ws, wsName: ws.name, headers: hdr.values[0], hasMatch: !!nr.match,
+            entries: items.map(function (item, i) {
+              var t = targets[i];
+              return { item: item, built: builts[i], target: t, existing: t.existingValues, existingFmt: t.existingFormats };
+            })
+          };
         });
       });
     });
   }
 
+  // where the CDF goes, in words (short for the list, long for the form)
+  function targetText(t, short) {
+    if (t.existing) return short ? "Updates row " + t.row : "already exists in row " + t.row + " — that row will be updated";
+    if (t.prepared) return short ? "Row " + t.row + " (prepared)" : "goes to row " + t.row + ", the row prepared for it (its PDF links are already there)";
+    if (t.insert) return short ? "New row " + t.row + ", after " + t.after : "goes to a new row " + t.row + ", inserted right after " + t.after + " and its solution rows";
+    return short ? "New row " + t.row : "goes to a new row " + t.row + " at the end";
+  }
+  function targetFlags(t, hasMatch) {
+    var f = [];
+    if (!t.existing && !t.prepared && !t.insert && hasMatch) f.push("No prepared row with this CDF number in column B — it is added after the last row.");
+    if (!t.existing && !t.insert && t.after) f.push("Revision of " + t.after + ", which is the last CDF in the sheet — added at the end.");
+    return f;
+  }
+
   // write one entry's cells (no sync) and return its log rows
   function writeEntryCells(ws, wsName, en, stamp) {
-    var log = [], row = en.target.row;
+    var log = [], t = en.target, at = t.writeRow || t.row;
+    if (t.insert) ws.getRangeByIndexes(at - 1, 0, 1, 1).getEntireRow().insert("Down");
     en.built.cells.forEach(function (c) {
       if (E.isEmpty(c.value)) return;
-      var rg = ws.getRangeByIndexes(row - 1, c.idx, 1, 1);
+      var rg = ws.getRangeByIndexes(at - 1, c.idx, 1, 1);
       if (c.link) {
         rg.hyperlink = { address: c.link.address, textToDisplay: c.link.textToDisplay };
       } else {
         if (c.format) rg.numberFormat = [[c.format]];
         rg.values = [[safeValue(c.value)]];
       }
-      log.push([stamp, E.LOG_NOTES.newRow, wsName, String(row), en.built.cdf, c.col,
-        show(en.existing[c.idx], en.existingFmt[c.idx]), c.display, E.LOG_NOTES.newRow]);
+      log.push([stamp, E.LOG_NOTES.newRow, wsName, String(t.row), en.built.cdfFull || en.built.cdf, c.col,
+        show(en.existing[c.idx], en.existingFmt[c.idx]), c.display, t.insert ? E.LOG_NOTES.newRow + " (inserted)" : E.LOG_NOTES.newRow]);
     });
     return log;
   }
@@ -1062,12 +1087,12 @@
     var html = versionNoteHtml() +
       '<div class="batch"><div class="batch-head"><b>' + plan.entries.length + " CDFs in the reply</b><span>sheet " + esc(plan.wsName) + "</span></div>" +
       '<ul class="batch-list">' + plan.entries.map(function (en, i) {
-        var t = en.target, flags = (en.item.fields.flags || []).concat(en.built.warnings);
+        var t = en.target, flags = targetFlags(t, plan.hasMatch).concat(en.item.fields.flags || [], en.built.warnings);
         if (t.dupOf != null) flags = ["Same CDF as number " + (t.dupOf + 1) + " in this list — both write to row " + t.row].concat(flags);
         return '<li class="' + (b.on[i] ? "" : "off") + '"><label class="b-row">' +
           '<input type="checkbox" data-b="' + i + '"' + (b.on[i] ? " checked" : "") + ">" +
-          '<span class="b-cdf">' + esc(en.built.cdf || "(no CDF number)") + "</span>" +
-          '<span class="b-target ' + (t.existing ? "upd" : "new") + '">' + (t.existing ? "Updates row " : "New row ") + t.row + "</span>" +
+          '<span class="b-cdf">' + esc(en.built.cdfFull || en.built.cdf || "(no CDF number)") + "</span>" +
+          '<span class="b-target ' + (t.existing ? "upd" : t.insert ? "ins" : "new") + '">' + esc(targetText(t, true)) + "</span>" +
           '<span class="b-desc">' + esc(en.item.fields.description || "") + "</span>" +
           (flags.length ? '<ul class="b-flags">' + flags.map(function (f) { return "<li>" + esc(f) + "</li>"; }).join("") + "</ul>" : "") +
           "</label></li>";
@@ -1111,7 +1136,7 @@
         plan.entries.forEach(function (en) {
           var rows = writeEntryCells(plan.ws, plan.wsName, en, stamp);
           log = log.concat(rows);
-          done.push({ cdf: en.built.cdf, row: en.target.row, cells: rows.length, existing: en.target.existing });
+          done.push({ cdf: en.built.cdfFull || en.built.cdf, row: en.target.row, cells: rows.length, existing: en.target.existing });
         });
         return ctx.sync().then(function () {
           return state.rules.log && log.length ? appendLog(ctx, state.rules.log, log) : null;
@@ -1151,7 +1176,7 @@
     return Excel.run(function (ctx) {
       return planEntries(ctx, [item]).then(function (plan) {
         var en = plan.entries[0];
-        return { ws: plan.wsName, headers: plan.headers, target: en.target, existing: en.existing, existingFmt: en.existingFmt, built: en.built };
+        return { ws: plan.wsName, headers: plan.headers, hasMatch: plan.hasMatch, target: en.target, existing: en.existing, existingFmt: en.existingFmt, built: en.built };
       });
     }).then(function (place) {
       state.draft = { built: place.built, place: place, item: item };
@@ -1166,13 +1191,12 @@
 
   function renderDraft() {
     var d = state.draft, p = d.place, item = d.item, q = queuePos();
-    var flags = (item.fields.flags || []).concat(d.built.warnings);
+    var flags = targetFlags(p.target, p.hasMatch).concat(item.fields.flags || [], d.built.warnings);
     var html = versionNoteHtml();
     if (q.total > 1) html += '<div class="queue"><span>CDF ' + q.n + " of " + q.total + "</span><b>" + esc(d.built.cdf) + "</b></div>" +
       '<div class="qbar"><span style="width:' + Math.round(100 * q.n / q.total) + '%"></span></div>';
-    html += '<div class="nr-target' + (p.target.existing ? " upd" : "") + '">' + (p.target.existing
-      ? "CDF " + esc(d.built.cdf) + " already exists in row " + p.target.row + " of sheet " + esc(p.ws) + " — that row will be updated"
-      : "New row " + p.target.row + " in sheet " + esc(p.ws)) + "</div>";
+    html += '<div class="nr-target' + (p.target.existing ? " upd" : "") + '">CDF ' + esc(d.built.cdfFull || d.built.cdf) + " " +
+      esc(targetText(p.target, false)) + " (sheet " + esc(p.ws) + ")</div>";
     if (flags.length) html += '<div class="note warn">Check:<ul>' + flags.map(function (f) { return "<li>" + esc(f) + "</li>"; }).join("") + "</ul></div>";
 
     d.built.cells.forEach(function (c, i) {
@@ -1183,6 +1207,8 @@
         '</span><span class="src">' + esc(c.label) + "</span></div>";
       if (c.kind === "ai" && c.label.indexOf("DESCRIPTION") >= 0) {
         html += '<textarea class="inp" dir="ltr" data-i="' + i + '">' + esc(c.display) + "</textarea>";
+      } else if (c.display.indexOf("\n") >= 0) {   // name + phone on two lines
+        html += '<textarea class="inp short" dir="ltr" rows="2" data-i="' + i + '">' + esc(c.display) + "</textarea>";
       } else {
         html += '<input class="inp" dir="ltr" data-i="' + i + '" value="' + esc(c.display) + '"' +
           (c.kind === "link" ? ' placeholder="File name, e.g. A330-1-NNN.-.pdf"' : "") + ">";
@@ -1194,7 +1220,7 @@
 
     var more = state.queue && state.queue.length;
     html += '<div class="confirm go" style="margin-top:12px"><p>Empty fields are not written and don\'t erase existing values. Every cell goes to ' + esc(state.rules.log || "the log") + ".</p>" +
-      '<div class="row wrap"><button id="writeRowBtn" class="btn ok">' + (p.target.existing ? "Update row " : "Add row ") + p.target.row + "</button>" +
+      '<div class="row wrap"><button id="writeRowBtn" class="btn ok">' + (p.target.existing ? "Update row " : p.target.insert ? "Insert row " : "Add row ") + p.target.row + "</button>" +
       (more ? '<button id="skipRowBtn" class="btn">Skip</button>' : "") +
       '<button id="cancelRowBtn" class="btn ghost">' + (more ? "Cancel all" : "Cancel") + "</button></div></div>";
     $("newRowForm").innerHTML = html;
@@ -1212,7 +1238,7 @@
     var inputs = $("newRowForm").querySelectorAll("[data-i]");
     Array.prototype.forEach.call(inputs, function (el) {
       var c = d.built.cells[+el.getAttribute("data-i")];
-      var v = el.value.trim();
+      var v = el.value.replace(/\r/g, "").trim();
       if (c.kind === "today" || c.kind === "now") {
         var serial = E.parseDateString(v);
         if (serial != null && v !== c.display) { c.value = serial; c.display = v; }
@@ -1236,7 +1262,7 @@
       });
     }).then(function (n) {
       state.draft = null;
-      state.written = (state.written || []).concat([{ cdf: d.built.cdf, row: row, cells: n }]);
+      state.written = (state.written || []).concat([{ cdf: d.built.cdfFull || d.built.cdf, row: row, cells: n }]);
       if (state.queue && state.queue.length) {
         state.busy = false;
         nextInQueue();
