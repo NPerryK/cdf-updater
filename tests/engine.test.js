@@ -269,6 +269,33 @@ test("pasted item -> row cells use the file names for CDF and links", () => {
   assert.strictEqual(b.cells.find((c) => c.col === "A").link.address, "A330-1-961.-ATT.pdf");
   assert.strictEqual(b.cells.find((c) => c.col === "G").value, "ROUTINE");
 });
+test("several CDFs at once: each new one takes the next free row, repeats share a row", () => {
+  const keys = ["CDF NUM", "A330-1-001", "A330-1-961", "", "A330-1-003", ""];
+  const t = E.assignNewRowTargets(keys, 2, ["A330-1-970", "A330-1-961.-", "A330-1-971", "A330-1-970.-"]);
+  assert.deepStrictEqual(t.map((x) => [x.row, x.existing]), [[6, false], [3, true], [7, false], [6, true]]);
+  assert.strictEqual(t[3].dupOf, 0);
+  assert.strictEqual(keys.length, 6, "the sheet's key list is not changed");
+});
+test("prompt_version is kept from the reply", () => {
+  const r = E.parseAiPaste('[{"cdf_number":"A330-1-1","prompt_version":"ABC123"},{"cdf_number":"A330-1-2"}]');
+  assert.strictEqual(r.items[0].prompt_version, "ABC123");
+  assert.strictEqual(r.items[1].prompt_version, "");
+});
+test("CLAUDE_PROJECT parses and is checked", () => {
+  assert.strictEqual(E.parseRules('CLAUDE_PROJECT "https://claude.ai/project/0193-abc"').claudeProject, "https://claude.ai/project/0193-abc");
+  assert.ok(/project's address/.test(E.parseRules('CLAUDE_PROJECT "https://claude.ai/new"').errors[0].message));
+  assert.strictEqual(E.parseRules(fs.readFileSync(path.join(__dirname, "..", "rules.txt"), "utf8")).claudeProject, null, "commented out by default");
+});
+test("prompt: version code is stable, changes with the text, and is asked for in the reply", () => {
+  const P = require("../prompt.js").CdfPrompt || globalThis.CdfPrompt;
+  const base = fs.readFileSync(path.join(__dirname, "..", "ai-prompt.txt"), "utf8");
+  const a = P.build(base), b = P.build(base.replace(/\n/g, "\r\n")), c = P.build(base + "\nOne more rule.");
+  assert.match(a.version, /^[0-9A-F]{6}$/);
+  assert.strictEqual(a.version, b.version, "line endings don't matter");
+  assert.notStrictEqual(a.version, c.version);
+  assert.ok(a.text.includes('prompt_version: always "' + a.version + '"') && a.text.includes('"prompt_version": "' + a.version + '"'));
+  assert.ok(a.text.includes("UPPERCASE English") && a.text.includes("OUTPUT FORMAT"));
+});
 
 console.log("email + reports");
 test("REPORT and EMAIL_GROUP parse", () => {

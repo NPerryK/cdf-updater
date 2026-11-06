@@ -228,7 +228,7 @@
       imports: [], algorithms: [], log: "UPDATE LOG", errors: [],
       newRow: { sheet: { first: true, name: null }, startRow: null, headerRow: 1, key: null, cells: [] },
       emailGroups: [], reports: [],
-      cdfAlgorithm: null,
+      cdfAlgorithm: null, claudeProject: null,
       cdfConfig: { stations: {}, suppliers: {}, finalApprovalSigner: null, pendingTables: [], duplicates: [] }
     };
     var lines = String(text || "").replace(/^﻿/, "").split(/\n/);
@@ -321,6 +321,11 @@
             break;
           }
           case "AI_MODEL": { cur.str(); cur.end(); break; } // old setting, ignored
+          case "CLAUDE_PROJECT": {
+            var purl = cur.str().trim(); cur.end();
+            if (!/^https:\/\/claude\.ai\/project\/[A-Za-z0-9-]+/.test(purl)) throw new Error("CLAUDE_PROJECT needs the project's address, e.g. \"https://claude.ai/project/...\"");
+            result.claudeProject = purl; break;
+          }
           // ----- CDF algorithm (code) and its settings -----
           case "CDF_ALGORITHM": { result.cdfAlgorithm = { version: cur.done() ? "" : cur.str(), line: lineNo }; cur.end(); break; }
           case "STATION": case "SUPPLIER": {
@@ -629,12 +634,30 @@
     return { row: Math.max(last + 2, startRow), existing: false };
   }
 
+  // Targets for several CDFs written together: each new CDF takes the next free row,
+  // and a CDF that appears twice in the batch goes to the same row (dupOf = index of the first).
+  function assignNewRowTargets(keyValues, startRow, cdfs) {
+    var keys = (keyValues || []).slice(), seen = {};
+    return cdfs.map(function (cdf, i) {
+      var id = loose(normalizeCdf(cdf));
+      var t = findNewRowTarget(keys, startRow, cdf);
+      if (id && seen[id] != null) t.dupOf = seen[id];
+      if (id && seen[id] == null) seen[id] = i;
+      if (!t.existing) {
+        while (keys.length < t.row) keys.push("");
+        keys[t.row - 1] = cdf || "(new)";
+      }
+      return t;
+    });
+  }
+
   // ---------- answer pasted from claude.ai ----------
   var PASTE_KEYS = ["main_file", "att_file", "cdf_number", "form_date", "priority", "description",
     "oem_category", "drawing_number", "installation", "code", "initiator"];
   var PASTE_ALIASES = {
     cdf: "cdf_number", cdf_num: "cdf_number", date: "form_date", oem: "oem_category",
-    drawing: "drawing_number", main: "main_file", att: "att_file", attachment: "att_file", owner: "initiator"
+    drawing: "drawing_number", main: "main_file", att: "att_file", attachment: "att_file", owner: "initiator",
+    version: "prompt_version", promptversion: "prompt_version"
   };
 
   // returns { items: [{main_file, att_file, cdf_number, ..., flags:[]}], error }
@@ -669,10 +692,11 @@
         key = PASTE_ALIASES[key] || key;
         if (key === "flags") {
           it.flags = Array.isArray(raw[k]) ? raw[k].map(String).filter(Boolean) : (raw[k] ? [String(raw[k])] : []);
-        } else if (PASTE_KEYS.indexOf(key) >= 0) {
+        } else if (PASTE_KEYS.indexOf(key) >= 0 || key === "prompt_version") {
           it[key] = raw[k] == null ? "" : String(raw[k]).trim();
         }
       });
+      if (it.prompt_version == null) it.prompt_version = "";
       PASTE_KEYS.forEach(function (k) { if (it[k] == null) it[k] = ""; });
       if (it.cdf_number || it.main_file || it.description) items.push(it);
     });
@@ -786,6 +810,7 @@
     importFileMatches: importFileMatches,
     matchImportSlot: matchImportSlot,
     parseAiPaste: parseAiPaste,
+    assignNewRowTargets: assignNewRowTargets,
     normalizeCdf: normalizeCdf,
     buildNewRowCells: buildNewRowCells,
     findNewRowTarget: findNewRowTarget,

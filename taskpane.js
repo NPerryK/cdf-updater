@@ -22,6 +22,9 @@
     queue: [],              // CDF rows waiting for review (paste can hold several)
     queueTotal: 0,
     written: [],
+    batch: null,            // several CDFs from one reply: {items, plan, on[]}
+    prompt: null,           // {text, version} built from ai-prompt.txt
+    promptWarn: null,       // the reply was made with other instructions
     mail: null              // last built email {subject, text, html}
   };
   var GROUPS_KEY = "cdfUpdater.mailGroups.v1";
@@ -31,6 +34,8 @@
   // ---------------- startup ----------------
   function start(info) {
     state.inExcel = !!(info && window.Office && info.host === Office.HostType.Excel);
+    setLamp("excelLamp", state.inExcel ? "EXCEL" : "NO EXCEL", state.inExcel ? "ok" : "warn",
+      state.inExcel ? "Connected to this workbook" : "Opened outside Excel - workbook actions are off");
     if (!state.inExcel) {
       showBanner("Opened outside Excel: you can check the rules file, but workbook actions only work inside Excel.", false);
     } else {
@@ -42,7 +47,7 @@
     try { localStorage.removeItem("cdfUpdater.apiKey.v1"); localStorage.removeItem("cdfUpdater.aiMode.v1"); } catch (e) { /* ignore */ }
     wire();
     restoreLocalRules();
-    loadRules();
+    loadRules().then(function () { return fetchPrompt(); });
   }
 
   if (window.Office && Office.onReady) Office.onReady(start);
@@ -63,7 +68,12 @@
     // new row
     $("copyPrompt").addEventListener("click", copyPrompt);
     $("openClaude").addEventListener("click", openClaude);
-    $("pasteBox").addEventListener("input", refreshButtons);
+    $("openProject").addEventListener("click", openProject);
+    $("copyInstructions").addEventListener("click", function () { copyInstructions($("copyInstructions")); });
+    $("saveProject").addEventListener("click", saveProject);
+    $("projectUrl").addEventListener("keydown", function (ev) { if (ev.key === "Enter") saveProject(); });
+    $("pasteBox").addEventListener("paste", onPaste);
+    $("pasteBox").addEventListener("input", function () { $("pasteBox").classList.remove("read"); $("pasteMsg").textContent = ""; refreshButtons(); });
     $("parsePaste").addEventListener("click", parsePasted);
     // email
     $("mailKind").addEventListener("change", function () { $("mailSubject").value = defaultSubject(); $("mailPreview").innerHTML = ""; });
@@ -79,7 +89,26 @@
   }
 
   function renderExtras() {
-    renderMailKinds(); renderGroups();
+    renderMailKinds(); renderGroups(); renderProject();
+  }
+
+  // checklist state of a step: done + a short note next to its title
+  function markStep(n, text) {
+    var el = $("step" + n) || (n === 3 ? $("newRowCard") : n === 4 ? $("mailCard") : null);
+    if (!el) return;
+    el.classList.add("done");
+    $("state" + n).textContent = text + " " + hhmm(new Date());
+  }
+
+  function renderLamps() {
+    var r = state.rules;
+    if (!r) { setLamp("algoLamp", "ALGO", "", "No rules loaded"); return; }
+    if (r.cdfAlgorithm) {
+      var want = r.cdfAlgorithm.version, have = window.CdfAlgo.ALGORITHM_VERSION;
+      if (want && want !== have) setLamp("algoLamp", "ALGO CHECK", "warn", "rules.txt expects algorithm " + want + ", the code implements " + have);
+      else setLamp("algoLamp", "ALGO " + have, "ok", "CDF algorithm " + have + ", stage " + window.CdfAlgo.STAGE);
+    } else if (r.algorithms.length) setLamp("algoLamp", "ALGO RULES", "ok", "Algorithm from the rules file");
+    else setLamp("algoLamp", "ALGO", "", "No algorithm in the rules file");
   }
 
   // ---------------- rules ----------------
@@ -91,7 +120,7 @@
   }
 
   function loadRules() {
-    setPill("Loading rules…", "");
+    setPill("RULES", "");
     var p = state.source === "local"
       ? Promise.resolve(state.rulesText)
       : fetch("rules.txt?v=" + Date.now(), { cache: "no-store" }).then(function (r) {
@@ -100,7 +129,7 @@
         });
     return p.then(applyRulesText).catch(function (e) {
       state.rules = null;
-      setPill("No rules", "bad");
+      setPill("NO RULES", "bad"); renderLamps();
       $("rulesErrors").innerHTML = '<div class="err">' + esc(e.message) + "</div>";
       renderSlots(); renderAlgos(); renderExtras(); refreshButtons();
     });
@@ -113,7 +142,8 @@
     state.lastPreview = null;
     $("results").innerHTML = "";
     var errs = state.rules.errors.length;
-    setPill(errs ? errs + (errs > 1 ? " rule errors" : " rule error") : "Rules OK", errs ? "bad" : "ok");
+    setPill(errs ? "RULES " + errs + " ERR" : "RULES OK", errs ? "bad" : "ok");
+    renderLamps();
     renderRules(); renderSlots(); renderAlgos(); renderExtras(); refreshButtons();
   }
 
@@ -176,10 +206,10 @@
       var el = document.createElement("label");
       el.className = "slot" + (f ? " has-file" : "") + (st && !f ? " " + st.kind : "");
       el.innerHTML =
-        '<div class="slot-title"><span>File ' + s.slot + (s.file ? ' · <span class="slot-expect">' + esc(s.file) + "</span>" : "") + "</span>" +
+        '<div class="slot-title"><span>' + (s.file ? '<span class="slot-expect">' + esc(s.file) + "</span>" : "File " + s.slot) + "</span>" +
         (f ? '<button type="button" class="slot-clear" title="Remove">✕</button>' : "") + "</div>" +
-        '<div class="slot-target">→ sheet <b>' + esc(s.target) + "</b>" + (s.from ? " (from \"" + esc(s.from) + "\")" : "") + "</div>" +
-        '<div class="slot-file">' + (f ? esc(f.name) + " · " + kb(f.size) : "Click to choose, or drop the file here (xlsx / xlsm / csv)") + "</div>" +
+        '<div class="slot-target">Replaces sheet <b>' + esc(s.target) + "</b>" + (s.from ? " (from \"" + esc(s.from) + "\")" : "") + "</div>" +
+        '<div class="slot-file">' + (f ? esc(f.name) + " (" + kb(f.size) + ")" : "Drop the file here or click to choose") + "</div>" +
         (f && s.file && !E.importFileMatches(s.file, f.name) ? '<div class="slot-warn">Expected a file named ' + esc(s.file) + "</div>" : "") +
         (st && !f ? '<div class="slot-msg">' + esc(st.msg) + "</div>" : "") +
         '<input type="file" accept=".xlsx,.xlsm,.csv" multiple hidden>';
@@ -263,13 +293,17 @@
         setStatus("Replacing sheet " + s.target + "…");
         return importOne(s, f).then(function (info) {
           delete state.files[s.slot];
-          state.slotStatus[s.slot] = { kind: "done", msg: "Replaced ✓ " + hhmm(new Date()) + " · " + f.name + (info ? " · " + info : "") };
+          state.slotStatus[s.slot] = { kind: "done", msg: "Replaced ✓ " + hhmm(new Date()) + ", " + f.name + (info ? ", " + info : "") };
         }).catch(function (e) {
           state.slotStatus[s.slot] = { kind: "failed", msg: errText(e) };
         }).then(renderSlots);
       });
     });
-    chain.then(function () { state.busy = false; clearStatus(); refreshButtons(); });
+    chain.then(function () {
+      state.busy = false; clearStatus(); refreshButtons();
+      var ok = slots.filter(function (s) { return state.slotStatus[s.slot] && state.slotStatus[s.slot].kind === "done"; });
+      if (ok.length) markStep(1, ok.length + (ok.length > 1 ? " sheets" : " sheet") + " replaced");
+    });
   }
 
   function importOne(slot, file) {
@@ -406,11 +440,12 @@
     var A = window.CdfAlgo, want = r.cdfAlgorithm.version, have = A.ALGORITHM_VERSION;
     var html = '<div class="algo"><div class="algo-name">CDF algorithm</div>' +
       '<div class="algo-meta">Algorithm version in the code: <b>' + esc(have) + "</b>" +
-      (want ? " · rules file expects: <b>" + esc(want) + "</b>" : "") + "</div>";
+      (want ? "<br>The rules file expects: <b>" + esc(want) + "</b>" : "") + "</div>";
     if (want && want !== have) html += '<div class="note warn" style="margin-top:6px">The rules file expects algorithm version ' + esc(want) +
       " but the code implements " + esc(have) + ". The code needs an update before the results can be trusted.</div>";
     html += "<ol>" + A.STAGES.map(function (s) {
-      return '<li class="' + (s.done ? "" : "onchange") + '">' + (s.done ? "✓ " : "Later: ") + esc(s.name) + "</li>";
+      return s.done ? '<li class="done"><span class="tickmark">✓</span> ' + esc(s.name) + "</li>"
+        : '<li class="onchange"><span class="later">Later:</span> ' + esc(s.name) + "</li>";
     }).join("") + "</ol></div>";
     return html;
   }
@@ -475,6 +510,8 @@
 
     if (applied && nChanges) html += '<div class="note ok">Update written ✓' + (state.rules.log ? " — every change and its previous value is in sheet <b>" + esc(state.rules.log) + "</b>." : "") + "</div>";
     if (!nChanges) html += '<div class="note ok">Nothing to update — the CDF sheet already matches GCC.</div>';
+    if (applied && nChanges) markStep(2, nChanges + " cells written");
+    else if (!nChanges && !res.errors.length) markStep(2, "Up to date");
     if (res.info.onlyGcc.length) html += '<div class="note warn">In GCC but not in the CDF sheet (add them as new rows):' + chips(res.info.onlyGcc) + "</div>";
     if (res.info.onlyCdf.length) html += '<div class="note warn">In the CDF sheet but not in GCC (left as they are):' + chips(res.info.onlyCdf) + "</div>";
     if (res.warnings.length) html += '<div class="note warn"><ul>' + res.warnings.map(function (w) { return "<li>" + esc(w.key + ": " + w.message) + "</li>"; }).join("") + "</ul></div>";
@@ -689,7 +726,7 @@
         tile(s.matchedRows - s.changedRows, "Unchanged") +
         "</div>";
 
-      if (applied && res.changes.length) html += '<div class="note ok">Update written ✓' + (state.rules.log ? " — every change and its previous value is saved in sheet <b>" + esc(state.rules.log) + "</b>." : "") + "</div>";
+      if (applied && res.changes.length) { html += '<div class="note ok">Update written ✓' + (state.rules.log ? " — every change and its previous value is saved in sheet <b>" + esc(state.rules.log) + "</b>." : "") + "</div>"; markStep(2, "Written"); }
       if (!res.changes.length) html += '<div class="note ok">Nothing to update — the base sheet already matches the update file.</div>';
 
       if (s.duplicateUpdateKeys.length) {
@@ -734,6 +771,8 @@
   }
 
   // ================= new row (via claude.ai) =================
+  var PROJECT_KEY = "cdfUpdater.claudeProject.v1";
+
   function showNewRowNote(msg, kind) {
     $("newRowForm").innerHTML = '<div class="note ' + (kind || "bad") + '">' + esc(msg) + "</div>";
   }
@@ -742,8 +781,100 @@
     return fetch("ai-prompt.txt?v=" + Date.now(), { cache: "no-store" })
       .then(function (r) { return r.ok ? r.text() : null; })
       .catch(function () { return null; })
-      .then(function (t) { return t && t.trim() ? t : CdfPrompt.DEFAULT_PROMPT; });
+      .then(function (t) {
+        state.prompt = CdfPrompt.build(t && t.trim() ? t : CdfPrompt.DEFAULT_PROMPT);
+        renderProject();
+        return state.prompt;
+      });
   }
+
+  // ---- Claude Project: link + which instructions version was copied into it ----
+  function loadProject() {
+    var p = null;
+    try { p = JSON.parse(localStorage.getItem(PROJECT_KEY) || "null"); } catch (e) { p = null; }
+    p = p || {};
+    if (!p.url && state.rules && state.rules.claudeProject) { p.url = state.rules.claudeProject; p.fromRules = true; }
+    return p;
+  }
+  function saveProjectRecord(p) {
+    try { localStorage.setItem(PROJECT_KEY, JSON.stringify({ url: p.url || null, version: p.version || null, at: p.at || null })); } catch (e) { /* ignore */ }
+  }
+
+  function projectUrlOk(u) { return /^https:\/\/claude\.ai\/project\/[A-Za-z0-9-]+/.test(String(u || "").trim()); }
+
+  function renderProject() {
+    var p = loadProject(), cur = state.prompt && state.prompt.version;
+    var has = !!p.url;
+    $("nrProject").classList.toggle("hidden", !has);
+    $("nrPrompt").classList.toggle("hidden", has);
+    $("projectSetupTitle").textContent = has ? "Claude Project settings" : "Skip the prompt: set up a Claude Project";
+    // without a project the set-up link sits right under the prompt step; with one it moves to the end
+    var setup = $("projectSetup"), body = setup.parentNode;
+    if (has && setup.nextElementSibling) body.appendChild(setup);
+    if (!has && setup.previousElementSibling !== $("nrPrompt")) body.insertBefore(setup, $("nrPrompt").nextElementSibling);
+    if (has && document.activeElement !== $("projectUrl")) $("projectUrl").value = p.url;
+
+    var info = "";
+    if (has) {
+      info += '<dl class="kv"><dt>Project</dt><dd>' + esc(p.url.replace(/^https:\/\/claude\.ai\//, "")) + (p.fromRules ? " (from rules.txt)" : "") + "</dd>" +
+        "<dt>Instructions</dt><dd>" + (p.version ? 'version <span class="code">' + esc(p.version) + "</span>" + (p.at ? ", copied " + esc(p.at) : "") : "not copied from this computer") + "</dd>" +
+        (cur ? '<dt>Current</dt><dd>version <span class="code">' + esc(cur) + "</span></dd>" : "") + "</dl>" +
+        (p.fromRules ? "" : '<div class="row"><button id="forgetProject" class="btn ghost small" type="button">Stop using the project</button></div>');
+    }
+    $("projectInfo").innerHTML = info;
+    var fp = $("forgetProject");
+    if (fp) fp.addEventListener("click", function () {
+      var rec = loadProject(); rec.url = null; saveProjectRecord(rec);
+      $("projectUrl").value = ""; $("projectUrlMsg").textContent = ""; renderProject();
+    });
+
+    // the prompt changed after the instructions were copied into the project
+    var stale = has && cur && p.version && p.version !== cur;
+    $("projectNote").innerHTML = stale
+      ? '<div class="note warn"><b>The instructions changed</b> (ai-prompt.txt was edited). Replace the project\'s instructions so new replies follow them.' +
+        '<div><button id="copyInstr2" class="btn small" type="button"><svg class="ico"><use href="#i-copy"/></svg>Copy project instructions</button></div></div>'
+      : "";
+    var c2 = $("copyInstr2");
+    if (c2) c2.addEventListener("click", function () { copyInstructions(c2); });
+  }
+
+  function copyInstructions(btn) {
+    fetchPrompt().then(function (pr) {
+      return copyText(pr.text).then(function (ok) {
+        var msg = $("copyInstrMsg");
+        if (!ok) { msg.className = "msg bad"; msg.textContent = "Copy failed here — click the button again."; return; }
+        var rec = loadProject();
+        rec.version = pr.version; rec.at = dateStr(new Date()) + " " + hhmm(new Date());
+        saveProjectRecord(rec);
+        msg.className = "msg ok";
+        msg.textContent = "Copied ✓ (version " + pr.version + "). In the project: Instructions → paste → Save.";
+        if (btn && btn.id === "copyInstr2") { $("projectSetup").open = true; }
+        renderProject();
+      });
+    });
+  }
+
+  function saveProject() {
+    var u = $("projectUrl").value.trim(), msg = $("projectUrlMsg");
+    if (!projectUrlOk(u)) {
+      msg.className = "msg bad";
+      msg.textContent = "That isn't a project address. Open the project in Claude and copy the address from the browser — it starts with https://claude.ai/project/";
+      return;
+    }
+    var rec = loadProject(); rec.url = u.split(/[?#]/)[0]; saveProjectRecord(rec);
+    msg.className = "msg ok";
+    msg.textContent = rec.version ? "Saved ✓ — from now on: Open the Claude project, drag in the PDFs, send." : "Saved ✓ — also copy the instructions into the project (step 2 above).";
+    renderProject();
+  }
+
+  function openUrl(url) {
+    try {
+      if (window.Office && Office.context && Office.context.ui && Office.context.ui.openBrowserWindow) { Office.context.ui.openBrowserWindow(url); return; }
+    } catch (e) { /* fall back */ }
+    window.open(url, "_blank");
+  }
+  function openClaude() { openUrl("https://claude.ai/new"); }
+  function openProject() { var p = loadProject(); if (p.url) openUrl(p.url); }
 
   function newRowSheet(ctx) {
     var s = state.rules.newRow.sheet;
@@ -756,33 +887,216 @@
   }
 
   function copyPrompt() {
-    fetchPrompt().then(function (base) {
-      var text = CdfPrompt.pastePrompt(base);
-      return copyText(text).then(function (ok) {
-        $("copyPromptMsg").textContent = ok
-          ? "Prompt copied ✓ — paste it into Claude together with the files."
-          : "Copy failed here — click the button again.";
+    fetchPrompt().then(function (pr) {
+      return copyText(pr.text).then(function (ok) {
+        var m = $("copyPromptMsg");
+        m.className = ok ? "msg ok" : "msg bad";
+        m.textContent = ok ? "Prompt copied ✓ — paste it into Claude together with the files." : "Copy failed here — click the button again.";
       });
     });
   }
 
-  function openClaude() {
-    var url = "https://claude.ai/new";
-    try {
-      if (window.Office && Office.context && Office.context.ui && Office.context.ui.openBrowserWindow) { Office.context.ui.openBrowserWindow(url); return; }
-    } catch (e) { /* fall back */ }
-    window.open(url, "_blank");
+  // ---- reading the reply ----
+  function onPaste(ev) {
+    var text = ev.clipboardData && ev.clipboardData.getData("text/plain");
+    if (!text) { setTimeout(function () { refreshButtons(); if ($("pasteBox").value.trim()) parsePasted(); }, 0); return; }
+    ev.preventDefault();
+    $("pasteBox").value = text;   // a paste is always a new reply: it replaces what was in the box
+    refreshButtons();
+    parsePasted();
   }
 
   function parsePasted() {
     if (state.busy) return;
     var res = E.parseAiPaste($("pasteBox").value);
-    if (res.error) { showNewRowNote(res.error, "bad"); return; }
-    state.queue = res.items.map(function (it) {
-      return { fields: it, main: it.main_file || null, att: it.att_file || null };
+    if (res.error) {
+      $("pasteBox").classList.remove("read");
+      $("pasteMsg").textContent = "";
+      showNewRowNote(res.error, "bad");
+      return;
+    }
+    state.draft = null; state.queue = []; state.written = [];
+    var items = res.items.map(function (it) { return { fields: it, main: it.main_file || null, att: it.att_file || null }; });
+    (state.prompt ? Promise.resolve(state.prompt) : fetchPrompt()).then(function () {
+      state.promptWarn = versionWarning(items);
+      $("pasteBox").classList.add("read");
+      $("pasteMsg").className = "msg ok";
+      $("pasteMsg").textContent = "Read ✓ " + items.length + " CDF" + (items.length > 1 ? "s" : "");
+      if (items.length === 1) { state.queue = items; state.queueTotal = 1; nextInQueue(); }
+      else planBatch(items);
     });
-    state.queueTotal = state.queue.length;
-    nextInQueue();
+  }
+
+  function versionWarning(items) {
+    var cur = state.prompt && state.prompt.version;
+    if (!cur) return null;
+    var seen = {};
+    items.forEach(function (it) { seen[it.fields.prompt_version || ""] = true; });
+    var vs = Object.keys(seen);
+    if (vs.length === 1 && vs[0] === cur) return null;
+    var old = vs.filter(function (v) { return v && v !== cur; });
+    if (old.length) return "This reply was made with older instructions (version " + old.join(", ") + "; current " + cur + "). " +
+      "Check the fields carefully, and update the project's instructions so the next reply follows the current ones.";
+    return "This reply has no instructions version, so it may follow older instructions. If it came from the Claude Project, copy the project instructions again.";
+  }
+
+  function versionNoteHtml() {
+    if (!state.promptWarn) return "";
+    return '<div class="note warn">' + esc(state.promptWarn) +
+      '<div><button class="btn small js-copy-instr" type="button"><svg class="ico"><use href="#i-copy"/></svg>Copy project instructions</button></div></div>';
+  }
+  function wireVersionNote(root) {
+    Array.prototype.forEach.call(root.querySelectorAll(".js-copy-instr"), function (b) {
+      b.addEventListener("click", function () { $("projectSetup").open = true; copyInstructions(b); b.textContent = "Copied ✓ — paste it into the project"; });
+    });
+  }
+
+  // ---- where each CDF goes: one read of the sheet for the whole batch ----
+  function planEntries(ctx, items) {
+    var nr = state.rules.newRow, algo = state.rules.algorithms[0], now = new Date();
+    var builts = items.map(function (item) {
+      return E.buildNewRowCells(nr, {
+        ai: item.fields, mainName: item.main, attName: item.att,
+        now: now, dateFormat: algo ? algo.dateFormat : "dd/mm/yyyy"
+      });
+    });
+    return newRowSheet(ctx).then(function (ws) {
+      var maxIdx = Math.max.apply(null, nr.cells.map(function (c) { return c.idx; }).concat([nr.key.idx]));
+      var used = ws.getUsedRangeOrNullObject(true);
+      used.load("rowIndex,rowCount");
+      var hdr = ws.getRangeByIndexes(nr.headerRow - 1, 0, 1, maxIdx + 1);
+      hdr.load("values");
+      return ctx.sync().then(function () {
+        var rows = used.isNullObject ? 0 : used.rowIndex + used.rowCount;
+        var keyRg = rows ? ws.getRangeByIndexes(0, nr.key.idx, rows, 1) : null;
+        if (keyRg) keyRg.load("values");
+        return ctx.sync().then(function () {
+          var keyVals = keyRg ? keyRg.values.map(function (r) { return r[0]; }) : [];
+          var targets = E.assignNewRowTargets(keyVals, nr.startRow, builts.map(function (b) { return b.cdf; }));
+          var rowRgs = targets.map(function (t) {
+            var rg = ws.getRangeByIndexes(t.row - 1, 0, 1, maxIdx + 1);
+            rg.load("values,numberFormat");
+            return rg;
+          });
+          return ctx.sync().then(function () {
+            return {
+              ws: ws, wsName: ws.name, headers: hdr.values[0],
+              entries: items.map(function (item, i) {
+                return { item: item, built: builts[i], target: targets[i], existing: rowRgs[i].values[0], existingFmt: rowRgs[i].numberFormat[0] };
+              })
+            };
+          });
+        });
+      });
+    });
+  }
+
+  // write one entry's cells (no sync) and return its log rows
+  function writeEntryCells(ws, wsName, en, stamp) {
+    var log = [], row = en.target.row;
+    en.built.cells.forEach(function (c) {
+      if (E.isEmpty(c.value)) return;
+      var rg = ws.getRangeByIndexes(row - 1, c.idx, 1, 1);
+      if (c.link) {
+        rg.hyperlink = { address: c.link.address, textToDisplay: c.link.textToDisplay };
+      } else {
+        if (c.format) rg.numberFormat = [[c.format]];
+        rg.values = [[safeValue(c.value)]];
+      }
+      log.push([stamp, E.LOG_NOTES.newRow, wsName, String(row), en.built.cdf, c.col,
+        show(en.existing[c.idx], en.existingFmt[c.idx]), c.display, E.LOG_NOTES.newRow]);
+    });
+    return log;
+  }
+
+  // ---- several CDFs: overview first, then write all or check one by one ----
+  function planBatch(items) {
+    state.busy = true; refreshButtons();
+    setStatus("Finding the place of each CDF in the workbook…");
+    Excel.run(function (ctx) { return planEntries(ctx, items); })
+      .then(function (plan) { state.batch = { items: items, plan: plan, on: items.map(function () { return true; }) }; renderBatch(); })
+      .catch(function (e) { showNewRowNote(errText(e), "bad"); })
+      .then(function () { state.busy = false; clearStatus(); refreshButtons(); });
+  }
+
+  function renderBatch() {
+    var b = state.batch, plan = b.plan;
+    var nOn = b.on.filter(Boolean).length;
+    var html = versionNoteHtml() +
+      '<div class="batch"><div class="batch-head"><b>' + plan.entries.length + " CDFs in the reply</b><span>sheet " + esc(plan.wsName) + "</span></div>" +
+      '<ul class="batch-list">' + plan.entries.map(function (en, i) {
+        var t = en.target, flags = (en.item.fields.flags || []).concat(en.built.warnings);
+        if (t.dupOf != null) flags = ["Same CDF as number " + (t.dupOf + 1) + " in this list — both write to row " + t.row].concat(flags);
+        return '<li class="' + (b.on[i] ? "" : "off") + '"><label class="b-row">' +
+          '<input type="checkbox" data-b="' + i + '"' + (b.on[i] ? " checked" : "") + ">" +
+          '<span class="b-cdf">' + esc(en.built.cdf || "(no CDF number)") + "</span>" +
+          '<span class="b-target ' + (t.existing ? "upd" : "new") + '">' + (t.existing ? "Updates row " : "New row ") + t.row + "</span>" +
+          '<span class="b-desc">' + esc(en.item.fields.description || "") + "</span>" +
+          (flags.length ? '<ul class="b-flags">' + flags.map(function (f) { return "<li>" + esc(f) + "</li>"; }).join("") + "</ul>" : "") +
+          "</label></li>";
+      }).join("") + "</ul>" +
+      '<div class="confirm go"><p>Empty fields are not written and don\'t erase existing values. Every cell goes to ' + esc(state.rules.log || "the log") + ".</p>" +
+      '<div class="row wrap"><button id="writeAllBtn" class="btn ok"' + (nOn ? "" : " disabled") + ">Write " + nOn + " row" + (nOn === 1 ? "" : "s") + "</button>" +
+      '<button id="reviewBtn" class="btn"' + (nOn ? "" : " disabled") + ">Check one by one</button>" +
+      '<button id="cancelBatch" class="btn ghost">Cancel</button></div></div></div>';
+    $("newRowForm").innerHTML = html;
+    wireVersionNote($("newRowForm"));
+    Array.prototype.forEach.call($("newRowForm").querySelectorAll("[data-b]"), function (el) {
+      el.addEventListener("change", function () { b.on[+el.getAttribute("data-b")] = el.checked; renderBatch(); });
+    });
+    $("writeAllBtn").addEventListener("click", function () { writeBatch(selectedBatchItems()); });
+    $("reviewBtn").addEventListener("click", function () {
+      state.queue = selectedBatchItems(); state.queueTotal = state.queue.length; state.batch = null; nextInQueue();
+    });
+    $("cancelBatch").addEventListener("click", cancelNewRows);
+  }
+
+  function selectedBatchItems() {
+    var b = state.batch;
+    return b.items.filter(function (_, i) { return b.on[i]; });
+  }
+
+  function cancelNewRows() {
+    state.draft = null; state.queue = []; state.batch = null; state.written = [];
+    $("newRowForm").innerHTML = "";
+    $("pasteBox").value = ""; $("pasteBox").classList.remove("read"); $("pasteMsg").textContent = "";
+    refreshButtons();
+  }
+
+  function writeBatch(items) {
+    if (state.busy || !items.length) return;
+    state.busy = true; refreshButtons();
+    setStatus("Writing " + items.length + " rows…");
+    var stamp = stampOf(new Date());
+    Excel.run(function (ctx) {
+      return planEntries(ctx, items).then(function (plan) {   // re-plan: the sheet may have changed meanwhile
+        var log = [], done = [];
+        plan.entries.forEach(function (en) {
+          var rows = writeEntryCells(plan.ws, plan.wsName, en, stamp);
+          log = log.concat(rows);
+          done.push({ cdf: en.built.cdf, row: en.target.row, cells: rows.length, existing: en.target.existing });
+        });
+        return ctx.sync().then(function () {
+          return state.rules.log && log.length ? appendLog(ctx, state.rules.log, log) : null;
+        }).then(function () { return done; });
+      });
+    }).then(function (done) { state.batch = null; showWritten(done); })
+      .catch(function (e) { showNewRowNote(errText(e), "bad"); })
+      .then(function () { state.busy = false; clearStatus(); refreshButtons(); });
+  }
+
+  function showWritten(done) {
+    $("pasteBox").value = ""; $("pasteBox").classList.remove("read"); $("pasteMsg").textContent = "";
+    var one = done.length === 1 ? done[0] : null;
+    $("newRowForm").innerHTML = '<div class="note ok">' + (one
+      ? one.cells + " cells written in row " + one.row + " (CDF " + esc(one.cdf) + ")"
+      : done.length + " CDFs written: " + done.map(function (w) { return esc(w.cdf) + " (row " + w.row + ")"; }).join(", ")) + " ✓" +
+      '<div><button id="mailNewRow" class="btn small">Send by email</button></div></div>';
+    markStep(3, done.length + (done.length === 1 ? " row" : " rows") + " written");
+    $("mailNewRow").addEventListener("click", function () {
+      $("mailKind").value = "newrows"; $("mailSubject").value = defaultSubject();
+      $("mailCard").open = true; $("mailCard").scrollIntoView({ behavior: "smooth" });
+    });
   }
 
   // ---- one draft at a time from the queue ----
@@ -797,35 +1111,13 @@
   }
 
   function prepareDraft(item) {
-    var nr = state.rules.newRow, algo = state.rules.algorithms[0];
-    var built = E.buildNewRowCells(nr, {
-      ai: item.fields, mainName: item.main, attName: item.att,
-      now: new Date(), dateFormat: algo ? algo.dateFormat : "dd/mm/yyyy"
-    });
     return Excel.run(function (ctx) {
-      return newRowSheet(ctx).then(function (ws) {
-        var maxIdx = Math.max.apply(null, nr.cells.map(function (c) { return c.idx; }).concat([nr.key.idx]));
-        var used = ws.getUsedRangeOrNullObject(true);
-        used.load("rowIndex,rowCount");
-        var hdr = ws.getRangeByIndexes(nr.headerRow - 1, 0, 1, maxIdx + 1);
-        hdr.load("values");
-        return ctx.sync().then(function () {
-          var rows = used.isNullObject ? 0 : used.rowIndex + used.rowCount;
-          var keyRg = rows ? ws.getRangeByIndexes(0, nr.key.idx, rows, 1) : null;
-          if (keyRg) keyRg.load("values");
-          return ctx.sync().then(function () {
-            var keyVals = keyRg ? keyRg.values.map(function (r) { return r[0]; }) : [];
-            var target = E.findNewRowTarget(keyVals, nr.startRow, built.cdf);
-            var rowRg = ws.getRangeByIndexes(target.row - 1, 0, 1, maxIdx + 1);
-            rowRg.load("values,numberFormat");
-            return ctx.sync().then(function () {
-              return { ws: ws.name, headers: hdr.values[0], target: target, existing: rowRg.values[0], existingFmt: rowRg.numberFormat[0] };
-            });
-          });
-        });
+      return planEntries(ctx, [item]).then(function (plan) {
+        var en = plan.entries[0];
+        return { ws: plan.wsName, headers: plan.headers, target: en.target, existing: en.existing, existingFmt: en.existingFmt, built: en.built };
       });
     }).then(function (place) {
-      state.draft = { built: built, place: place, item: item };
+      state.draft = { built: place.built, place: place, item: item };
       renderDraft();
     });
   }
@@ -838,8 +1130,10 @@
   function renderDraft() {
     var d = state.draft, p = d.place, item = d.item, q = queuePos();
     var flags = (item.fields.flags || []).concat(d.built.warnings);
-    var html = q.total > 1 ? '<div class="queue"><span>CDF ' + q.n + " of " + q.total + "</span><span>" + esc(d.built.cdf) + "</span></div>" : "";
-    html += '<div class="nr-target">' + (p.target.existing
+    var html = versionNoteHtml();
+    if (q.total > 1) html += '<div class="queue"><span>CDF ' + q.n + " of " + q.total + "</span><b>" + esc(d.built.cdf) + "</b></div>" +
+      '<div class="qbar"><span style="width:' + Math.round(100 * q.n / q.total) + '%"></span></div>';
+    html += '<div class="nr-target' + (p.target.existing ? " upd" : "") + '">' + (p.target.existing
       ? "CDF " + esc(d.built.cdf) + " already exists in row " + p.target.row + " of sheet " + esc(p.ws) + " — that row will be updated"
       : "New row " + p.target.row + " in sheet " + esc(p.ws)) + "</div>";
     if (flags.length) html += '<div class="note warn">Check:<ul>' + flags.map(function (f) { return "<li>" + esc(f) + "</li>"; }).join("") + "</ul></div>";
@@ -862,15 +1156,16 @@
     });
 
     var more = state.queue && state.queue.length;
-    html += '<div class="confirm go" style="margin-top:12px"><p>Empty fields are not written (and don\'t erase existing values). Everything is recorded in ' + esc(state.rules.log || "the log") + ".</p>" +
+    html += '<div class="confirm go" style="margin-top:12px"><p>Empty fields are not written and don\'t erase existing values. Every cell goes to ' + esc(state.rules.log || "the log") + ".</p>" +
       '<div class="row wrap"><button id="writeRowBtn" class="btn ok">' + (p.target.existing ? "Update row " : "Add row ") + p.target.row + "</button>" +
-      (more ? '<button id="skipRowBtn" class="btn ghost">Skip</button>' : "") +
+      (more ? '<button id="skipRowBtn" class="btn">Skip</button>' : "") +
       '<button id="cancelRowBtn" class="btn ghost">' + (more ? "Cancel all" : "Cancel") + "</button></div></div>";
     $("newRowForm").innerHTML = html;
+    wireVersionNote($("newRowForm"));
     $("writeRowBtn").addEventListener("click", writeDraft);
     var sk = $("skipRowBtn");
     if (sk) sk.addEventListener("click", function () { state.draft = null; nextInQueue(); });
-    $("cancelRowBtn").addEventListener("click", function () { state.draft = null; state.queue = []; $("newRowForm").innerHTML = ""; });
+    $("cancelRowBtn").addEventListener("click", cancelNewRows);
   }
 
   function writeDraft() {
@@ -893,46 +1188,25 @@
 
     state.busy = true; refreshButtons();
     setStatus("Writing to the workbook…");
-    var now = new Date(), stamp = stampOf(now), row = d.place.target.row;
+    var stamp = stampOf(new Date()), row = d.place.target.row;
+    var entry = { built: d.built, target: d.place.target, existing: d.place.existing, existingFmt: d.place.existingFmt };
     Excel.run(function (ctx) {
       return newRowSheet(ctx).then(function (ws) {
-        var log = [];
-        d.built.cells.forEach(function (c) {
-          if (E.isEmpty(c.value)) return;
-          var rg = ws.getRangeByIndexes(row - 1, c.idx, 1, 1);
-          if (c.link) {
-            rg.hyperlink = { address: c.link.address, textToDisplay: c.link.textToDisplay };
-          } else {
-            if (c.format) rg.numberFormat = [[c.format]];
-            rg.values = [[safeValue(c.value)]];
-          }
-          var old = d.place.existing[c.idx];
-          log.push([stamp, E.LOG_NOTES.newRow, ws.name, String(row), d.built.cdf, c.col,
-            show(old, d.place.existingFmt[c.idx]), c.display, E.LOG_NOTES.newRow]);
-        });
+        var log = writeEntryCells(ws, ws.name, entry, stamp);
         return ctx.sync().then(function () {
-          return state.rules.log ? appendLog(ctx, state.rules.log, log) : null;
+          return state.rules.log && log.length ? appendLog(ctx, state.rules.log, log) : null;
         }).then(function () { return log.length; });
       });
     }).then(function (n) {
-      var cdf = d.built.cdf;
       state.draft = null;
-      state.written = (state.written || []).concat([{ cdf: cdf, row: row, cells: n }]);
+      state.written = (state.written || []).concat([{ cdf: d.built.cdf, row: row, cells: n }]);
       if (state.queue && state.queue.length) {
         state.busy = false;
         nextInQueue();
         return true; // next draft is loading
       }
       var done = state.written; state.written = [];
-      $("pasteBox").value = "";
-      $("newRowForm").innerHTML = '<div class="note ok">' + (done.length > 1
-        ? done.length + " CDFs written: " + done.map(function (w) { return esc(w.cdf) + " (row " + w.row + ")"; }).join(", ")
-        : n + " cells written in row " + row + " (CDF " + esc(cdf) + ")") + " ✓" +
-        '<div class="row" style="margin-top:6px"><button id="mailNewRow" class="btn small">Send by email</button></div></div>';
-      $("mailNewRow").addEventListener("click", function () {
-        $("mailKind").value = "newrows"; $("mailSubject").value = defaultSubject();
-        $("mailCard").open = true; $("mailCard").scrollIntoView({ behavior: "smooth" });
-      });
+      showWritten(done);
       return false;
     }).catch(function (e) { showNewRowNote(errText(e), "bad"); return false; })
       .then(function (loadingNext) { if (!loadingNext) { state.busy = false; clearStatus(); refreshButtons(); } });
@@ -1099,6 +1373,7 @@
       if (doc.empty) { $("mailPreview").innerHTML = '<div class="note warn">Nothing to send for this output.</div>'; state.mail = null; return; }
       state.mail = E.buildEmail(doc);
       renderMail();
+      markStep(4, "Draft ready");
     }).catch(function (e) { $("mailPreview").innerHTML = '<div class="note bad">' + esc(errText(e)) + "</div>"; })
       .then(function () { state.busy = false; clearStatus(); refreshButtons(); });
   }
@@ -1179,7 +1454,7 @@
     var ok = !!state.rules && !state.rules.errors.length;
     $("importBtn").disabled = state.busy || !ok || !state.inExcel || !state.canImport || !chosenSlots().length;
     var n = chosenSlots().length;
-    $("importBtn").textContent = n > 1 ? "Replace " + n + " sheets" : "Replace sheet";
+    $("importBtn").textContent = n > 1 ? "Replace " + n + " sheets" : n === 1 ? "Replace sheet" : "Replace sheets";
     $("previewBtn").disabled = state.busy || !ok || !state.inExcel;
     var ab = $("applyBtn"); if (ab) ab.disabled = state.busy;
     var hasRowSpec = ok && state.rules.newRow.cells.length > 0;
@@ -1190,7 +1465,10 @@
 
   function setStatus(t) { $("statusText").textContent = t; $("status").classList.remove("hidden"); }
   function clearStatus() { $("status").classList.add("hidden"); }
-  function setPill(t, cls) { var p = $("rulesPill"); p.textContent = t; p.className = "pill " + (cls || ""); }
+  function setLamp(id, t, cls, title) { var p = $(id); p.textContent = t; p.className = "lamp " + (cls || ""); if (title) p.title = title; }
+  function setPill(t, cls) {
+    setLamp("rulesPill", t, cls, cls === "ok" ? "rules.txt loaded with no errors" : cls === "bad" ? "The rules file has errors - see Rules file at the bottom" : "Loading rules.txt");
+  }
   function showBanner(t, bad) { var b = $("banner"); b.textContent = t; b.className = "banner" + (bad ? " bad" : ""); }
   function showError(e) { $("results").innerHTML = '<div class="note bad">' + esc(errText(e)) + "</div>"; }
 

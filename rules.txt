@@ -100,6 +100,13 @@ NEWROW O = AI.INITIATOR
 
 # The instructions Claude gets are in ai-prompt.txt - you can edit them.
 
+# Claude Project (faster): put the instructions in a Claude Project once, and from then on you only
+# open the project, drag in the PDFs and send - no prompt to copy. Set it up in the pane
+# (step 3 -> "Set up a Claude Project"). The pane keeps the link on this computer; to keep it even
+# after the Office cache is cleared, write it here too (remove the # at the start of the line):
+# CLAUDE_PROJECT "https://claude.ai/project/..."
+# After editing ai-prompt.txt, the pane tells you to copy the new instructions into the project.
+
 
 # ---------------- Email ----------------
 # Reports you can send by email, in addition to "Changes from the last run" and "New rows added today".
