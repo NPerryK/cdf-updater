@@ -366,6 +366,40 @@ test("prompt: version code is stable, changes with the text, and is asked for in
 });
 
 console.log("email + reports");
+test("EMAIL DRAFT tables are read with their merged cells (rowspan)", () => {
+  const v = [["A330-300 P2F — Daily CDF Status — 05/11/2026"], [], ["בוקר טוב ... AS OF 05/11/2026 08:10 (Asia/Jerusalem)."], [],
+    ["PERSONS – GROUP – SIGNATURE – CDF – PENDING MANTRA DOCUMENTS"],
+    ["PERSON", "# of M", "MAIN GROUP", "SIGNATURE POSITION", "CDF NUMBERS", "PENDING MANTRA DOCUMENTS"],
+    ["P1", 1, "IAI", "Rejected", "A330-1-1.-", "DOC-1 Rev -"],
+    ["P2", 2, "IAI", "Check Design", "A330-1-2.-", "DOC-2 Rev A\r\nDOC-3 Rev -"],
+    ["", "", "", "Check Design", "A330-1-3.-", "DOC-4 Rev B"],
+    [], [],
+    ["CDFS RELEASED - LAST 24 HOURS (AS OF 05/11/2026 08:10 Asia/Jerusalem)"], ["CDF NUMBER", "PREVIOUS STATUS", "NEW STATUS"],
+    ["A330-1-9.-", "Open", "Released"], ["TOTAL", "", 1], ["בברכה,"], [], ["Name"]];
+  const t = E.readSheetTables(v, ["PERSONS", "CDFS RELEASED — LAST 24", "CDFS RELEASED — LAST 7"]);
+  assert.strictEqual(t.length, 2, "dash kinds don't matter; a missing table is skipped");
+  assert.deepStrictEqual(t[0].rows.map((r) => r.map((c) => c && (c.v.slice(0, 5) + (c.rowspan > 1 ? "^" + c.rowspan : "")))),
+    [["P1", "1", "IAI", "Rejec", "A330-", "DOC-1"], ["P2^2", "2^2", "IAI^2", "Check", "A330-", "DOC-2"], [null, null, null, "Check", "A330-", "DOC-4"]]);
+  assert.strictEqual(t[0].rows[1][5].v, "DOC-2 Rev A\nDOC-3 Rev -");
+  assert.deepStrictEqual(t[1].rows.map((r) => r.map((c) => c.v)), [["A330-1-9.-", "Open", "Released"], ["TOTAL", "", "1"]], "TOTAL ends the table, its empty cell is not merged");
+  assert.strictEqual(t[1].endRow, 14);
+  const m = E.buildDailyEmail({ subject: "S", opening: "בוקר טוב", signature: ["בברכה,", "Name"],
+    tables: [{ title: "CDF STATUS", headers: ["CDF STATUS", "CDF'S"], rows: [[{ v: "Open", rowspan: 1 }, { v: "3", rowspan: 1 }]] }].concat(t) });
+  assert.ok(m.html.includes('colspan="2"') && m.html.includes('colspan="6"') && m.html.includes('colspan="3"'), "title rows span the table");
+  assert.ok(m.html.includes('rowspan="2"') && m.html.includes("DOC-2 Rev A<br>DOC-3 Rev -"));
+  assert.ok(m.html.includes("background:#B10001;color:#FFFFFF;font-weight:bold") && m.html.includes("border:1px solid #BCBCBC"), "red headers, grey borders");
+  assert.ok(m.html.includes('dir="rtl"') && m.html.includes('dir="ltr"'), "Hebrew text RTL, tables LTR");
+  assert.strictEqual((m.html.match(/<br><br>/g) || []).length, 2, "two empty lines between tables");
+  assert.ok(m.text.startsWith("בוקר טוב") && m.text.endsWith("Name"));
+});
+test("the add-in version is the same everywhere (badge, file versions, manifest)", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "taskpane.html"), "utf8");
+  const badge = /id="appVersion"[^>]*>v([\d.]+)</.exec(html)[1];
+  const vs = [...html.matchAll(/\?v=([\d.]+)"/g)].map((m) => m[1]);
+  assert.ok(vs.length >= 6 && vs.every((x) => x === badge), "every ?v= equals the badge " + badge + ": " + vs);
+  const mf = /<Version>([\d.]+)<\/Version>/.exec(fs.readFileSync(path.join(__dirname, "..", "manifest.xml"), "utf8"))[1];
+  assert.strictEqual(mf, badge + ".0");
+});
 test("REPORT and EMAIL_GROUP parse", () => {
   assert.strictEqual(rules.reports.length, 2);
   assert.deepStrictEqual(generic.reports[0].columns.map((c) => c.col), ["C", "T", "X"]);

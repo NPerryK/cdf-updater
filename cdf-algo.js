@@ -5,7 +5,7 @@
  *   00.4-00.7  key / empty R / Cancelled rules        10    GCC Final Approval + Igor -> Released
  *   05.3/20.1  key normalisation and matching          20.2  import J,AM,AN,P,Q -> R,S,T,Y,Z
  *   20.3       explicit station mapping (+ Completed)  20.3.2 fixed correction A330-1-052 (another)
- *   100.3-100.5, 100.8  CDF SUMMARY tables that come from GCC (computed + cross-checked, not written yet)
+ *   100.3-100.5, 100.8  CDF SUMMARY tables that come from GCC (computed here; cdf-summary.js writes them in stage 3)
  *   130.6      control totals
  *
  * Pure logic, no Office.js: works in the task pane (window.CdfAlgo) and in Node (tests / replay).
@@ -17,14 +17,15 @@
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
-  var STAGE = 1;
+  var STAGE = 1;          // this file: stage 1. STAGES_DONE: how far the add-in goes (2: cdf-mantra.js, 3: cdf-summary.js, 4: cdf-history.js)
+  var STAGES_DONE = 4;
   // the algorithm text this code implements; rules.txt states the version it expects (CDF_ALGORITHM "...")
   var ALGORITHM_VERSION = "2026-11-05";
   var STAGES = [
     { n: 1, name: "GCC → CDF (R, S, T, Y, Z) and the GCC tables of CDF SUMMARY", done: true },
-    { n: 2, name: "Mantra → CDF (AA, AB, U:X), solution rows, closure date", done: false },
-    { n: 3, name: "CDF SUMMARY (all tables) and EMAIL DRAFT", done: false },
-    { n: 4, name: "BACKUPDATA history, releases in 24 h / 7 days, ERROR", done: false }
+    { n: 2, name: "Mantra → CDF (AA, AB, U:X), solution rows, closure date", done: true },
+    { n: 3, name: "CDF SUMMARY (all tables) and EMAIL DRAFT", done: true },
+    { n: 4, name: "BACKUPDATA history, releases in 24 h / 7 days, ERROR", done: true }
   ];
 
   function col(letter) {
@@ -43,7 +44,7 @@
   function upper(v) { return trim(v).replace(/\s+/g, " ").toUpperCase(); }
 
   // ---------- column maps (00.1 and 20.2) ----------
-  var CDF = { A: col("A"), C: col("C"), P: col("P"), Q: col("Q"), R: col("R"), S: col("S"), T: col("T"), U: col("U"),
+  var CDF = { A: col("A"), C: col("C"), F: col("F"), H: col("H"), J: col("J"), K: col("K"), P: col("P"), Q: col("Q"), R: col("R"), S: col("S"), T: col("T"), U: col("U"),
     V: col("V"), W: col("W"), X: col("X"), Y: col("Y"), Z: col("Z"), AA: col("AA"), AB: col("AB") };
   var GCC = { A: col("A"), J: col("J"), P: col("P"), Q: col("Q"), S: col("S"), AK: col("AK"), AM: col("AM"), AN: col("AN") };
 
@@ -68,7 +69,7 @@
   var R_VALUES = { "OPEN": "Open", "CANCELLED": "Cancelled", "CANCELED": "Cancelled", "RELEASED": "Released" };
 
   var DUPLICATE_KEY = "A330-1-052(ANOTHER)";   // 20.3.2 / 100.3
-  var MOR = "Mor Ifrah", IGOR = "Igor Golodriga";
+  // people come from the settings (rules.txt / workbook settings), not from the code
 
   // 100.8 supplier display
   var SUPPLIERS = { "ANN/SIE": "ANN/SIE", "SIE/ANN": "ANN/SIE", "ANN": "ANN/SIE", "ANCRA": "ANCARA", "ANCARA": "ANCARA", "TIMAT": "TIMAT", "IAI": "IAI" };
@@ -115,10 +116,9 @@
     Object.keys(cfg.suppliers || {}).forEach(function (k) { sp[upper(k)] = cfg.suppliers[k]; });
     var order = [];
     Object.keys(sp).forEach(function (k) { if (order.indexOf(sp[k]) < 0) order.push(sp[k]); });
-    var pend = cfg.pendingTables && cfg.pendingTables.length ? cfg.pendingTables
-      : [{ name: "MOR PENDING TABLE", person: MOR }, { name: "IGOR PENDING TABLE", person: IGOR }];
+    var pend = cfg.pendingTables && cfg.pendingTables.length ? cfg.pendingTables : [];
     var dups = (cfg.duplicates && cfg.duplicates.length ? cfg.duplicates : [DUPLICATE_KEY]).map(keyFull);
-    return { stations: st, suppliers: sp, supplierOrder: order, signer: cfg.finalApprovalSigner || IGOR, pending: pend, duplicates: dups };
+    return { stations: st, suppliers: sp, supplierOrder: order, signer: cfg.finalApprovalSigner || null, pending: pend, duplicates: dups };
   }
 
   // ---------- main ----------
@@ -143,7 +143,7 @@
     for (var g = 1; g < gcc.length; g++) {
       var gk = trim(cell(gcc, g, GCC.A));
       var am = trim(cell(gcc, g, GCC.AM));
-      if (gk && upper(am) === "FINAL APPROVAL" && upper(cell(gcc, g, GCC.AK)) === upper(set.signer)) {
+      if (gk && set.signer && upper(am) === "FINAL APPROVAL" && upper(cell(gcc, g, GCC.AK)) === upper(set.signer)) {
         out.gccChanges.push({ sheet: "GCC", row: g + 1, col: GCC.AM, colLetter: "AM", key: gk, oldValue: am, newValue: "Released",
           rule: "10", why: "Final Approval signed by " + set.signer });
         am = "Released";
@@ -238,7 +238,7 @@
     blocks.forEach(function (b) {
       if (!isEmpty(b.R)) return;
       var hasUX = b.rows.some(function (r) { return [CDF.U, CDF.V, CDF.W, CDF.X].some(function (c) { return !isEmpty(cell(cdf, r, c)); }); });
-      if (hasUX) out.warnings.push({ stage: "00.5", key: b.key, message: "R is empty but U:X has values (U:X is rewritten in stage 2)" });
+      if (hasUX) out.warnings.push({ stage: "00.5", key: b.key, message: "R is empty but U:X has values — the Mantra step empties U:X (00.5)" });
     });
 
     out.summary = buildSummary(blocks, cdf, set, isDup);
@@ -278,41 +278,67 @@
     sigRows.push(["TOTAL", sigTotal]);
 
     // 100.5.1 / 100.5.2 MOR / IGOR PENDING TABLES
+    // the solution rows of a CDF: Mantra status (U), document (AA) and revision (AB) of each
+    function docsOf(b) {
+      var docs = [], us = [], answer = false, validDoc = false, lines = [];
+      b.rows.forEach(function (r) {
+        var u = upper(cell(cdf, r, CDF.U)), aa = trim(cell(cdf, r, CDF.AA)), ab = trim(cell(cdf, r, CDF.AB));
+        lines.push("row " + (r + 1) + ": " + (aa || "(no AA)") + (aa && aa !== "-" ? " Rev " + (ab || "-") : "") + " — U " + (u || "(empty)"));
+        if (u === "ANSWER AT GCC" || upper(aa) === "ANSWER AT GCC") { answer = true; return; }
+        if (u && u !== "-") us.push(u);
+        if (aa && aa !== "-" && upper(aa) !== "CHECK SOLUTION" && u !== "NO ENG. DOC.") {
+          validDoc = true;
+          var d = aa + " Rev " + (ab || "-");
+          if (docs.indexOf(d) < 0) docs.push(d);
+        }
+      });
+      var allReleased = us.length > 0 && us.every(function (u) { return /RELEASED$/.test(u); });
+      return { docs: docs, us: us, answer: answer, validDoc: validDoc, allReleased: allReleased, lines: lines,
+        listed: (allReleased && validDoc) || answer };
+    }
     function pending(name) {
       var rows = [];
       open.forEach(function (b) {
         if (b.S !== "9 - Final Approval" || splitNames(b.T).indexOf(name) < 0) return;
-        var docs = [], us = [], answer = false, validDoc = false;
-        b.rows.forEach(function (r) {
-          var u = upper(cell(cdf, r, CDF.U)), aa = trim(cell(cdf, r, CDF.AA)), ab = trim(cell(cdf, r, CDF.AB));
-          if (u === "ANSWER AT GCC" || upper(aa) === "ANSWER AT GCC") { answer = true; return; }
-          if (u && u !== "-") us.push(u);
-          if (aa && aa !== "-" && upper(aa) !== "CHECK SOLUTION" && u !== "NO ENG. DOC.") {
-            validDoc = true;
-            var d = aa + " Rev " + (ab || "-");
-            if (docs.indexOf(d) < 0) docs.push(d);
-          }
-        });
-        var allReleased = us.length > 0 && us.every(function (u) { return /RELEASED$/.test(u); });
-        if ((allReleased && validDoc) || answer) {
-          var shown = docs.slice();
-          if (answer) shown.push("ANSWER AT GCC");
-          rows.push([b.key, (allReleased && validDoc) ? shown.join("\n") : "ANSWER AT GCC"]);
+        var d = docsOf(b);
+        if (d.listed) {
+          var shown = d.docs.slice();
+          if (d.answer) shown.push("ANSWER AT GCC");
+          rows.push([b.key, (d.allReleased && d.validDoc) ? shown.join("\n") : "ANSWER AT GCC"]);
         }
       });
       rows.sort(function (a, b) { return a[0].localeCompare(b[0]); });
       rows.push(["TOTAL", rows.length]);
       return rows;
     }
+    // why a CDF is / isn't in a pending table today (for the cross-check)
+    function explainPending(name, key) {
+      var b = blocks.filter(function (x) { return keyFull(x.key) === keyFull(key); })[0] ||
+              blocks.filter(function (x) { return keyBase(x.key) === keyBase(key); })[0];
+      if (!b) return "not in the CDF sheet";
+      if (b.R !== "Open") return "CDF status is " + (b.R || "empty") + " — only Open CDFs are listed";
+      if (b.S !== "9 - Final Approval") return "station is " + (b.S || "empty") + " — the table lists 9 - Final Approval only";
+      if (splitNames(b.T).indexOf(name) < 0) return "signature position is \"" + (b.T || "empty") + "\" — not " + name;
+      var d = docsOf(b);
+      var rows = " (" + d.lines.join("; ") + ")";
+      if (d.listed) return "listed: Open, 9 - Final Approval, signature " + name + ", " + (d.answer ? "ANSWER AT GCC" : "all Mantra statuses RELEASED") + rows;
+      if (!d.us.length) return "no Mantra status (U) on its solution rows" + rows;
+      if (!d.allReleased) return "not all Mantra statuses (U) are RELEASED" + rows;
+      return "no valid solution document in AA" + rows;
+    }
 
     // 100.8 WHERE ARE THE CDFS (Open + station 3, supplier from CDF!P)
-    var where = {}, unassigned = [];
-    set.supplierOrder.forEach(function (k) { where[k] = 0; });
+    var where = {}, unassigned = [], whereLists = {};
+    set.supplierOrder.forEach(function (k) { where[k] = 0; whereLists[k] = []; });
     open.forEach(function (b) {
       if (b.S !== "3 - Conversion Engineer") return;
       var p = upper(cell(cdf, b.anchor, CDF.P));
       var sup = set.suppliers[p];
-      if (sup) where[sup]++; else unassigned.push(b.key + (p ? " (" + trim(cell(cdf, b.anchor, CDF.P)) + ")" : ""));
+      if (sup) {
+        where[sup]++;
+        whereLists[sup].push({ key: b.key, row: b.anchor + 1, signature: trim(b.T), dwg: trim(cell(cdf, b.anchor, CDF.J)),
+          title: trim(cell(cdf, b.anchor, CDF.K)), desc: trim(cell(cdf, b.anchor, CDF.H)) });
+      } else unassigned.push(b.key + (p ? " (" + trim(cell(cdf, b.anchor, CDF.P)) + ")" : ""));
     });
     var whereRows = set.supplierOrder.map(function (s) { return [s, where[s]]; });
     whereRows.push(["TOTAL", set.supplierOrder.reduce(function (s, k) { return s + where[k]; }, 0)]);
@@ -326,6 +352,12 @@
       ].concat(set.pending.map(function (p) {
         return { name: p.name, headers: ["CDF NUMBER", "SOLUTION / DOCUMENT"], rows: pending(p.person) };
       })),
+      explain: function (tableName, key) {
+        var p = set.pending.filter(function (x) { return x.name === tableName; })[0];
+        return p ? explainPending(p.person, key) : "";
+      },
+      whereLists: whereLists,
+      pendingPeople: set.pending.map(function (p) { return { table: p.name, person: p.person }; }),
       openCount: open.length,
       station3Open: open.filter(function (b) { return b.S === "3 - Conversion Engineer"; }).length,
       unassigned: unassigned,
@@ -372,10 +404,11 @@
       var cur = {}; current.forEach(function (x) { cur[x[0]] = x[1]; });
       var calc = {}; tb.rows.forEach(function (x) { calc[x[0]] = str(x[1]); });
       Object.keys(calc).forEach(function (k) {
-        if (!cur.hasOwnProperty(k)) diffs.push({ label: k, current: "(missing)", computed: calc[k] });
+        if (!cur.hasOwnProperty(k)) diffs.push({ label: k, current: "(not in the sheet)", computed: calc[k] });
         else if (norm2(cur[k]) !== norm2(calc[k])) diffs.push({ label: k, current: cur[k], computed: calc[k] });
       });
-      Object.keys(cur).forEach(function (k) { if (!calc.hasOwnProperty(k)) diffs.push({ label: k, current: cur[k], computed: "(not in result)" }); });
+      Object.keys(cur).forEach(function (k) { if (!calc.hasOwnProperty(k)) diffs.push({ label: k, current: cur[k], computed: "(not listed today)" }); });
+      if (summary.explain) diffs.forEach(function (d) { if (d.label !== "TOTAL") { var w = summary.explain(tb.name, d.label); if (w) d.why = w; } });
       res.push({ table: tb.name, found: true, at: letter(pos.c) + (pos.r + 1), diffs: diffs, rows: tb.rows.length });
     });
     return res;
@@ -391,5 +424,5 @@
     return null;
   }
 
-  return { STAGE: STAGE, ALGORITHM_VERSION: ALGORITHM_VERSION, STAGES: STAGES, run: run, compareWithSheet: compareWithSheet, buildBlocks: buildBlocks, keyFull: keyFull, keyBase: keyBase, col: col, letter: letter };
+  return { STAGE: STAGE, STAGES_DONE: STAGES_DONE, ALGORITHM_VERSION: ALGORITHM_VERSION, STAGES: STAGES, run: run, settings: settings, compareWithSheet: compareWithSheet, buildBlocks: buildBlocks, keyFull: keyFull, keyBase: keyBase, col: col, letter: letter };
 });

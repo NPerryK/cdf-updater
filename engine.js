@@ -234,7 +234,7 @@
       newRow: { sheet: { first: true, name: null }, startRow: null, headerRow: 1, key: null, match: null, cells: [] },
       emailGroups: [], reports: [],
       cdfAlgorithm: null, claudeProject: null,
-      cdfConfig: { stations: {}, suppliers: {}, finalApprovalSigner: null, pendingTables: [], duplicates: [] }
+      cdfConfig: { stations: {}, suppliers: {}, finalApprovalSigner: null, pendingTables: [], duplicates: [], personGroups: [], personAliases: [] }
     };
     var lines = String(text || "").replace(/^﻿/, "").split(/\n/);
     var algo = null;
@@ -341,6 +341,17 @@
           case "FINAL_APPROVAL_RELEASE": { result.cdfConfig.finalApprovalSigner = cur.str(); cur.end(); break; }
           case "PENDING_TABLE": { var tn = cur.str(), who = cur.str(); cur.end(); result.cdfConfig.pendingTables.push({ name: tn.toUpperCase(), person: who }); break; }
           case "DUPLICATE_CDF": { result.cdfConfig.duplicates.push(cur.str()); cur.end(); break; }
+          // 120: people → group, for column V (PERSON_GROUP "group" "name; name; …", PERSON_ALIAS "as written" = "as in the group")
+          case "PERSON_GROUP": {
+            var pg = cur.str().trim(), names = cur.str(); cur.end();
+            if (!pg) throw new Error("PERSON_GROUP needs a group name");
+            var plist = names.split(/[;\n]+/).map(function (x) { return x.trim(); }).filter(Boolean);
+            if (!plist.length) throw new Error("PERSON_GROUP \"" + pg + "\" has no names — separate them with ;");
+            var have = result.cdfConfig.personGroups.filter(function (g) { return g.group === pg; })[0];
+            if (have) Array.prototype.push.apply(have.people, plist); else result.cdfConfig.personGroups.push({ group: pg, people: plist });
+            break;
+          }
+          case "PERSON_ALIAS": { var af = cur.str(); cur.op("="); var at = cur.str(); cur.end(); result.cdfConfig.personAliases.push({ from: af, to: at }); break; }
           // ----- email -----
           case "EMAIL_GROUP": {
             var gname = cur.str(), addrs = cur.str(); cur.end();
@@ -855,6 +866,93 @@
     return { subject: doc.title, text: text.join("\r\n").replace(/\s+$/, ""), html: html };
   }
 
+  // ---------- daily status email in the EMAIL DRAFT format (algorithm 150) ----------
+  function dashKey(v) { return String(v == null ? "" : v).toUpperCase().replace(/[\u2010-\u2015\-]/g, "-").replace(/\s+/g, " ").trim(); }
+
+  // a table read from a sheet: rows of cells; a row whose first cell is empty continues the row
+  // above, and its empty cells are covered by the cells above (rowspan) - like the merged cells
+  function spanRows(rows) {
+    var out = [], owner = [];
+    rows.forEach(function (row, i) {
+      var cont = i > 0 && row[0] === "" && row.some(function (v) { return v !== ""; });
+      out.push(row.map(function (v, j) {
+        if (cont && v === "" && owner[j]) { owner[j].rowspan++; return null; }
+        var c = { v: v, rowspan: 1 };
+        owner[j] = c;
+        return c;
+      }));
+    });
+    return out;
+  }
+
+  // finds tables in sheet values by the start of their title (first column); returns
+  // [{title, headers, rows (cells with rowspan, null = covered), startRow, endRow}] (rows 0-based)
+  function readSheetTables(values, prefixes) {
+    function v(r, c) { var row = values[r]; var x = row && c < row.length ? row[c] : ""; return x == null ? "" : String(x).replace(/\r\n?/g, "\n").trim(); }
+    var out = [];
+    prefixes.forEach(function (pfx) {
+      var want = dashKey(pfx);
+      for (var r = 0; r < values.length; r++) {
+        if (dashKey(v(r, 0)).indexOf(want) !== 0) continue;
+        var width = (values[r + 1] || []).length, n = 0;
+        for (var c = 0; c < width; c++) if (v(r + 1, c)) n = c + 1;
+        if (!n) continue;
+        var headers = [], rows = [], end = r + 1;
+        for (c = 0; c < n; c++) headers.push(v(r + 1, c));
+        for (var i = r + 2; i < values.length; i++) {
+          var row = [];
+          for (c = 0; c < n; c++) row.push(v(i, c));
+          if (row.every(function (x) { return x === ""; })) break;
+          rows.push(row); end = i;
+          if (row[0].toUpperCase() === "TOTAL") break;
+        }
+        out.push({ title: v(r, 0), headers: headers, rows: spanRows(rows), startRow: r, endRow: end });
+        break;
+      }
+    });
+    return out;
+  }
+
+  // doc: { subject, opening, tables:[{title, headers, rows:[[{v, rowspan}|null]]}], signature:[lines] }
+  function buildDailyEmail(doc) {
+    var dir = doc.dir === "ltr" ? "ltr" : "rtl", side = dir === "rtl" ? "right" : "left";
+    var font = "font-family:Calibri,Arial,sans-serif;font-size:10pt;";
+    var border = "border:1px solid #BCBCBC;";
+    var th = font + border + "background:#B10001;color:#FFFFFF;font-weight:bold;padding:2px 6px;text-align:center;vertical-align:middle;";
+    var td = font + border + "background:#FFFFFF;color:#000000;padding:2px 6px;text-align:left;vertical-align:middle;";
+    var html = '<div style="' + font + 'color:#000000">' +
+      '<p dir="' + dir + '" style="' + font + 'margin:0 0 12px;text-align:' + side + '">' +
+        htmlEsc(doc.opening).replace(/(AS OF [^<]*?\(Asia\/Jerusalem\))/, '<span dir="ltr">$1</span>') + "</p>";
+    var text = [doc.opening, ""];
+    doc.tables.forEach(function (t, k) {
+      var n = t.headers.length;
+      html += '<table dir="ltr" cellspacing="0" cellpadding="0" style="border-collapse:collapse;' + font + '">' +
+        '<tr><th colspan="' + n + '" style="' + th + '">' + htmlEsc(t.title) + "</th></tr>" +
+        "<tr>" + t.headers.map(function (h, i) {
+          var w = t.widths && t.widths[i];   // optional column widths (px), so long text doesn't make very tall rows
+          return "<th" + (w ? ' width="' + w + '"' : "") + ' style="' + th + (w ? "width:" + w + "px;min-width:" + w + "px;" : "") + '">' + htmlEsc(h) + "</th>";
+        }).join("") + "</tr>" +
+        t.rows.map(function (row) {
+          return "<tr>" + row.map(function (c) {
+            if (!c) return "";
+            var num = /^\d+$/.test(c.v);
+            return "<td" + (c.rowspan > 1 ? ' rowspan="' + c.rowspan + '"' : "") + ' style="' + td + (num ? "text-align:center;" : "") + '">' +
+              htmlEsc(c.v).replace(/\n/g, "<br>") + "</td>";
+          }).join("") + "</tr>";
+        }).join("") + "</table>" +
+        (k < doc.tables.length - 1 ? "<br><br>" : "");
+      text.push(t.title, t.headers.join("\t"));
+      t.rows.forEach(function (row) {
+        text.push(row.map(function (c) { return c ? c.v.replace(/\n/g, " / ") : ""; }).join("\t"));
+      });
+      text.push("", "");
+    });
+    var sig = (doc.signature && doc.signature.length) ? doc.signature : ["בברכה,"];
+    html += '<p dir="' + dir + '" style="' + font + 'margin:16px 0 0;text-align:' + side + '">' + sig.map(htmlEsc).join("<br>") + "</p></div>";
+    text = text.concat(sig);
+    return { subject: doc.subject, text: text.join("\r\n"), html: html };
+  }
+
   function mailtoUrl(to, cc, subject, body) {
     var q = [];
     if (cc && cc.length) q.push("cc=" + encodeURIComponent(cc.join(";")));
@@ -892,6 +990,8 @@
     importFileMatches: importFileMatches,
     matchImportSlot: matchImportSlot,
     parseAiPaste: parseAiPaste,
+    readSheetTables: readSheetTables,
+    buildDailyEmail: buildDailyEmail,
     assignNewRowTargets: assignNewRowTargets,
     planNewRowTargets: planNewRowTargets,
     cdfRevision: cdfRevision,

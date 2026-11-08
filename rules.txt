@@ -32,7 +32,12 @@ CDF_ALGORITHM "2026-11-05"
 # --- Settings the algorithm uses. Change them here when the algorithm text changes them. ---
 
 # 10: Final Approval signed by this person -> GCC!AM = Released
-FINAL_APPROVAL_RELEASE "Igor Golodriga"
+# 100.5.1 / 100.5.2: pending tables (Open, station 9, signature with this full name)
+# Both name people, so they are NOT in this public file: they live in the workbook settings
+# (SETUP > Workbook settings), one line each:
+#   FINAL_APPROVAL_RELEASE "<full name>"
+#   PENDING_TABLE "<NAME> PENDING TABLE" "<full name>"
+# Without them the pane stops and says what to paste.
 
 # 20.3: explicit station mapping, GCC!AM -> CDF!S  (a station missing here is reported, not guessed;
 #       "... Completed" always becomes Released - rule 20.3.1)
@@ -49,10 +54,6 @@ STATION "Released"                = "Released"
 
 # 20.3.2 / 100.3: duplicate CDF kept in CDF, not in GCC, excluded from the CDF STATUS count
 DUPLICATE_CDF "A330-1-052 (another)"
-
-# 100.5.1 / 100.5.2: pending tables (Open, station 9, signature with this full name)
-PENDING_TABLE "MOR PENDING TABLE"  "Mor Ifrah"
-PENDING_TABLE "IGOR PENDING TABLE" "Igor Golodriga"
 
 # 100.8: WHERE ARE THE CDFS - CDF!P (SEND TO) -> supplier shown (in this order)
 SUPPLIER "ANN/SIE" = "ANN/SIE"

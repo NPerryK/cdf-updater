@@ -4,6 +4,10 @@ const fs = require("fs");
 const path = require("path");
 const A = require("../cdf-algo.js");
 const E = require("../engine.js");
+// rules.txt no longer names people (FINAL_APPROVAL_RELEASE, PENDING_TABLE live in the workbook settings): invented ones for the tests
+const TEST_PEOPLE = '\nFINAL_APPROVAL_RELEASE "Tom Bar"\nPENDING_TABLE "DANA PENDING TABLE" "Dana Ben-Ari"\nPENDING_TABLE "TOM PENDING TABLE" "Tom Bar"\n';
+function rulesWithPeople() { return require("fs").readFileSync(require("path").join(__dirname, "..", "rules.txt"), "utf8") + TEST_PEOPLE; }
+
 
 let passed = 0;
 function test(name, fn) {
@@ -20,13 +24,13 @@ const cdfHeader = row({ C: "LINK TO GCC", P: "SEND TO", R: "CDF STATUS\n(GCC)", 
   U: "STATUS (MANTRA)", Y: "DEVIATION REASON", Z: "MINOR / MAJOR", AA: "CDF SOLUTION", AB: "CDF SOLUTION\nREVISION" }, 34);
 const gccHeader = row({ A: "CDF Number", J: "CDF Status", P: "Deviation Reason", Q: "Deviation Classification", S: "Engineering Disposition",
   AK: "Final Approval Name", AM: "Current Station", AN: "Current Assignee" }, 42);
-const cfg = E.parseRules(fs.readFileSync(path.join(__dirname, "..", "rules.txt"), "utf8")).cdfConfig;
+const cfg = E.parseRules(rulesWithPeople()).cdfConfig;
 
 // CDF sheet: 5 CDFs, one with two solution rows
 const cdf = [
   cdfHeader,
   row({ C: "X-001.-", P: "IAI", R: "Open", S: "3 - Conversion Engineer", T: "-", Y: "-", Z: "-" }, 34),
-  row({ C: "X-002.-", P: "ANN", R: "Open", S: "9 - Final Approval", T: "Mor Ifrah", Y: "Design Error", Z: "Minor", U: "4 - RELEASED", AA: "DOC-1", AB: "A" }, 34),
+  row({ C: "X-002.-", P: "ANN", R: "Open", S: "9 - Final Approval", T: "Dana Ben-Ari", Y: "Design Error", Z: "Minor", U: "4 - RELEASED", AA: "DOC-1", AB: "A" }, 34),
   row({ R: "Open", S: "9 - Final Approval", U: "4 - RELEASED", AA: "DOC-2", AB: "-" }, 34),            // solution row of X-002
   row({ C: "X-003.", P: "SIE/ANN", R: "Open", S: "3 - Conversion Engineer", T: "-", Y: "-", Z: "-" }, 34), // key without "-"
   row({ C: "X-004.-", R: "Open", S: "1 - Initiator", T: "-", U: "-", AA: "DOC-9", Y: "x", Z: "y" }, 34),
@@ -35,7 +39,7 @@ const cdf = [
 const gcc = [
   gccHeader,
   row({ A: "X-001.-", J: "Open", AM: "Conversion ENG", AN: "'-" }, 42),
-  row({ A: "X-002.-", J: "Open", AM: "Final Approval", AN: "Mor Ifrah", P: "Design Error", Q: "Minor" }, 42),
+  row({ A: "X-002.-", J: "Open", AM: "Final Approval", AN: "Dana Ben-Ari", P: "Design Error", Q: "Minor" }, 42),
   row({ A: "X-003.-", J: "Open", AM: "Conversion ENG", AN: "'-" }, 42),
   row({ A: "X-004.-", J: "Open", AM: "Initiator", AN: "'-", P: "x", Q: "y" }, 42),
 ];
@@ -54,29 +58,29 @@ test("summary tables", () => {
   const t = Object.fromEntries(A.run({ cdf, gcc }, cfg).summary.tables.map((x) => [x.name, x.rows]));
   assert.deepStrictEqual(t["CDF STATUS"], [["Open", 4], ["Cancelled", 0], ["Released", 0], ["TOTAL", 4]], "duplicate excluded");
   assert.deepStrictEqual(t["GCC CURRENT STATUS"].find((x) => x[0] === "3 - Conversion Engineer"), ["3 - Conversion Engineer", 2]);
-  assert.deepStrictEqual(t["GCC SIGNATURE POSITION"], [["Mor Ifrah", 1], ["TOTAL", 1]]);
-  assert.deepStrictEqual(t["MOR PENDING TABLE"], [["X-002.-", "DOC-1 Rev A\nDOC-2 Rev -"], ["TOTAL", 1]]);
+  assert.deepStrictEqual(t["GCC SIGNATURE POSITION"], [["Dana Ben-Ari", 1], ["TOTAL", 1]]);
+  assert.deepStrictEqual(t["DANA PENDING TABLE"], [["X-002.-", "DOC-1 Rev A\nDOC-2 Rev -"], ["TOTAL", 1]]);
   assert.deepStrictEqual(t["WHERE ARE THE CDFS"], [["ANN/SIE", 1], ["ANCARA", 0], ["TIMAT", 0], ["IAI", 1], ["TOTAL", 2]]);
 });
 test("GCC changes flow into R, S, T, Y, Z (anchor rows only)", () => {
   const g = clone(gcc);
   g[1][C("J")] = "Released"; g[1][C("AM")] = "Completed";                  // 20.3.1
-  g[2][C("AN")] = "Mor Ifrah, Igor Golodriga"; g[2][C("P")] = "";          // two signatures, empty reason -> "-"
+  g[2][C("AN")] = "Dana Ben-Ari, Tom Bar"; g[2][C("P")] = "";          // two signatures, empty reason -> "-"
   g[4][C("J")] = "Cancelled";                                               // 00.6
   const r = A.run({ cdf, gcc: g }, cfg);
   const by = Object.fromEntries(r.cdfChanges.map((c) => [c.colLetter + c.row, c]));
   assert.strictEqual(by.R2.newValue, "Released");
   assert.strictEqual(by.S2.newValue, "Released"); assert.strictEqual(by.S2.rule, "20.3.1");
-  assert.strictEqual(by.T3.newValue, "Mor Ifrah, Igor Golodriga");
+  assert.strictEqual(by.T3.newValue, "Dana Ben-Ari, Tom Bar");
   assert.strictEqual(by.Y3.newValue, "-");
   assert.ok(!r.cdfChanges.some((c) => c.row === 4), "solution row is never written");
   ["S", "T", "U", "Y", "Z", "AA"].forEach((k) => assert.strictEqual(by[k + "6"].newValue, "", "Cancelled clears " + k));
   const sig = Object.fromEntries(r.summary.tables.find((x) => x.name === "GCC SIGNATURE POSITION").rows);
-  assert.strictEqual(sig["Igor Golodriga"], 1);
+  assert.strictEqual(sig["Tom Bar"], 1);
 });
-test("rule 10: Final Approval signed by Igor -> GCC!AM Released", () => {
+test("rule 10: Final Approval signed by the FINAL_APPROVAL_RELEASE person -> GCC!AM Released", () => {
   const g = clone(gcc);
-  g[2][C("AK")] = "Igor Golodriga";
+  g[2][C("AK")] = "Tom Bar";
   const r = A.run({ cdf, gcc: g }, cfg);
   assert.deepStrictEqual(r.gccChanges.map((c) => [c.row, c.colLetter, c.oldValue, c.newValue]), [[3, "AM", "Final Approval", "Released"]]);
   assert.strictEqual(r.cdfChanges.find((c) => c.row === 3 && c.colLetter === "S").newValue, "Released");
@@ -116,11 +120,24 @@ test("compareWithSheet finds tables by title and lists differences", () => {
   const sheet = [["CDF STATUS"], ["CDF STATUS", "CDF'S"], ["Open", 3], ["Cancelled", 0], ["Released", 0], ["TOTAL", 3]];
   const cmp = A.compareWithSheet(r.summary, sheet);
   const st = cmp.find((t) => t.table === "CDF STATUS");
-  assert.deepStrictEqual(st.diffs, [{ label: "Open", current: "3", computed: "4" }, { label: "TOTAL", current: "3", computed: "4" }]);
+  assert.deepStrictEqual(st.diffs.map((d) => [d.label, d.current, d.computed]), [["Open", "3", "4"], ["TOTAL", "3", "4"]]);
   assert.strictEqual(cmp.find((t) => t.table === "WHERE ARE THE CDFS").found, false);
 });
+test("cross-check says why a CDF left / joined a pending table", () => {
+  const sheet = [["DANA PENDING TABLE"], ["CDF NUMBER", "SOLUTION / DOCUMENT"], ["X-002.-", "DOC-1 Rev A\nDOC-2 Rev -"], ["TOTAL", 1]];
+  const c2 = clone(cdf); c2[3][C("U")] = "3 - IN WORK";                         // solution row of X-002 not released
+  const why1 = A.compareWithSheet(A.run({ cdf: c2, gcc }, cfg).summary, sheet).find((t) => t.table === "DANA PENDING TABLE").diffs.find((d) => d.label === "X-002.-");
+  assert.strictEqual(why1.computed, "(not listed today)");
+  assert.match(why1.why, /not all Mantra statuses \(U\) are RELEASED .*row 4: DOC-2 Rev - — U 3 - IN WORK/);
+  const g = clone(gcc); g[2][C("AN")] = "Tom Bar";                        // signature moved
+  const why2 = A.compareWithSheet(A.run({ cdf, gcc: g }, cfg).summary, sheet).find((t) => t.table === "DANA PENDING TABLE").diffs.find((d) => d.label === "X-002.-");
+  assert.match(why2.why, /signature position is "Tom Bar" — not Dana Ben-Ari/);
+  const ok = A.compareWithSheet(A.run({ cdf, gcc }, cfg).summary, [["DANA PENDING TABLE"], ["CDF NUMBER", "SOLUTION / DOCUMENT"], ["TOTAL", 0]])
+    .find((t) => t.table === "DANA PENDING TABLE").diffs.find((d) => d.label === "X-002.-");
+  assert.strictEqual(ok.current, "(not in the sheet)"); assert.match(ok.why, /^listed: Open, 9 - Final Approval, signature Dana Ben-Ari/);
+});
 test("rules.txt: CDF_ALGORITHM and settings parse; version matches the code", () => {
-  const rules = E.parseRules(fs.readFileSync(path.join(__dirname, "..", "rules.txt"), "utf8"));
+  const rules = E.parseRules(rulesWithPeople());
   assert.deepStrictEqual(rules.errors, []);
   assert.strictEqual(rules.cdfAlgorithm.version, A.ALGORITHM_VERSION);
   assert.ok(E.parseRules('CDF_ALGORITHM "x"\nUPDATE "A"\nMATCH UPDATE.A = BASE.C\nCOPY UPDATE.B -> BASE.C').errors.some((e) => /either/.test(e.message)));
