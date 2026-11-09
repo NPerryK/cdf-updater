@@ -2,7 +2,7 @@
  * CDF Updater - CDF algorithm (code version of CDF_Algorithm_2026-11-05)
  *
  * STAGE 1 - GCC -> CDF
- *   00.4-00.7  key / empty R / Cancelled rules        10    GCC Final Approval + Igor -> Released
+ *   00.4-00.7  key / empty R / Cancelled rules        10    GCC Final Approval + the FINAL_APPROVAL_RELEASE signer -> Released
  *   05.3/20.1  key normalisation and matching          20.2  import J,AM,AN,P,Q -> R,S,T,Y,Z
  *   20.3       explicit station mapping (+ Completed)  20.3.2 fixed correction A330-1-052 (another)
  *   100.3-100.5, 100.8  CDF SUMMARY tables that come from GCC (computed here; cdf-summary.js writes them in stage 3)
@@ -138,7 +138,7 @@
 
     var blocks = buildBlocks(cdf);
 
-    // --- 10: GCC Final Approval + Igor -> Released (writes GCC!AM) ---
+    // --- 10: GCC Final Approval + the FINAL_APPROVAL_RELEASE signer -> Released (writes GCC!AM) ---
     var gccRows = [];
     for (var g = 1; g < gcc.length; g++) {
       var gk = trim(cell(gcc, g, GCC.A));

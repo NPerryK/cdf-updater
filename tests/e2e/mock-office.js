@@ -4,7 +4,7 @@
   window.__wb = wb;
 
   function newSheet(name, values, formats, f, merges) {
-    return { id: "{S" + (wb.nextId++) + "}", name: name, values: values || [], formats: formats || [], f: f || [], merges: merges || [] };
+    return { id: "{S" + (wb.nextId++) + "}", name: name, values: values || [], formats: formats || [], f: f || [], merges: merges || [], cfs: [], heights: [], hidden: [] };
   }
   wb.lost = [];       // values a merge threw away (the add-in should never cause one)
   // =IF($R$7="","",$R$7) style formulas are worked out; any other formula keeps its stored value
@@ -110,7 +110,73 @@
       });
     });
   }
-  wb.addSheet = function (name, values, formats, f, merges, filtered) { var s = newSheet(name, values, formats, f, merges); s.filtered = !!filtered; wb.sheets.push(s); return s; };
+  wb.addSheet = function (name, values, formats, f, merges, filtered, extra) {
+    var s = newSheet(name, values, formats, f, merges); s.filtered = !!filtered; wb.sheets.push(s);
+    extra = extra || {};
+    (extra.cfs || []).forEach(function (c) { s.cfs.push({ type: "Custom", areas: parseBoxes(c.areas), custom: newCustom(c) }); });
+    (extra.heights || []).forEach(function (h, i) { s.heights[i] = h; });
+    (extra.hidden || []).forEach(function (r) { s.hidden[r - 1] = true; });
+    return s;
+  };
+  // ---- conditional formats (sh.cfs: index = priority, 0 on top), as Office.js shows them
+  function newCustom(c) {
+    c = c || {};
+    var items = {};
+    if (c.top) items.EdgeTop = { sideIndex: "EdgeTop", style: "Continuous", color: c.top };
+    return { rule: { formula: c.formula || "", load: function () { return this; } }, format: { fill: { color: c.fill || null }, font: { color: c.font || null, bold: c.bold || null, italic: c.italic || null },
+      borders: { items: items, getItem: function (side) { return items[side] || (items[side] = { sideIndex: side }); } } } };
+  }
+  function parseBoxes(addr) {
+    return String(addr || "").split(",").map(function (a) {
+      a = a.replace(/^.*!/, "").replace(/\$/g, "").trim(); if (!a) return null;
+      if (/^[A-Z]+\d+$/.test(a)) a = a + ":" + a;
+      var m = /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(a);
+      if (!m) throw new Error("mock: address? " + a);
+      return { r1: +m[2] - 1, c1: colIdx(m[1]), r2: +m[4] - 1, c2: colIdx(m[3]) };
+    }).filter(Boolean);
+  }
+  function boxText(b) { return colName(b.c1) + (b.r1 + 1) + (b.r1 === b.r2 && b.c1 === b.c2 ? "" : ":" + colName(b.c2) + (b.r2 + 1)); }
+  function CF(sh, rule) {
+    this._sh = sh; this._rule = rule; this.type = rule.type; this.custom = rule.custom; this.stopIfTrue = false;
+  }
+  CF.prototype.load = function () { return this; };
+  Object.defineProperty(CF.prototype, "priority", {
+    get: function () { return this._sh.cfs.indexOf(this._rule); },
+    set: function (p) { var a = this._sh.cfs, i = a.indexOf(this._rule); a.splice(i, 1); a.splice(Math.min(p, a.length), 0, this._rule); }
+  });
+  CF.prototype.delete = function () { var a = this._sh.cfs, i = a.indexOf(this._rule); if (i >= 0) a.splice(i, 1); wb.calls.push("cfDelete " + this._sh.name); };
+  CF.prototype.getRangesOrNullObject = function () {
+    var sh = this._sh, r = this._rule;
+    return { isNullObject: !r.areas.length, areaCount: r.areas.length, load: function () { return this; }, address: r.areas.map(function (b) { return sh.name + "!" + boxText(b); }).join(", ") };
+  };
+  function CFCollection(sh, boxes) { this._sh = sh; this._boxes = boxes; }
+  CFCollection.prototype.load = function () { return this; };
+  CFCollection.prototype._hit = function () { var bx = this._boxes; return this._sh.cfs.filter(function (r) { return r.areas.some(function (a) { return bx.some(function (b) { return overlaps(a, b); }); }); }); };
+  Object.defineProperty(CFCollection.prototype, "items", { get: function () { var sh = this._sh; return this._hit().map(function (r) { return new CF(sh, r); }); } });
+  CFCollection.prototype.getCount = function () { return { value: this._hit().length }; };
+  CFCollection.prototype.add = function (type) {
+    if (type !== "Custom") throw new Error("mock: only custom conditional formats");
+    var rule = { type: type, areas: this._boxes.map(function (b) { return { r1: b.r1, c1: b.c1, r2: b.r2, c2: b.c2 }; }), custom: newCustom() };
+    this._sh.cfs.unshift(rule); wb.calls.push("cfAdd " + this._sh.name + " " + rule.areas.length);
+    return new CF(this._sh, rule);
+  };
+  CFCollection.prototype.clearAll = function () { var hit = this._hit(), sh = this._sh; sh.cfs = sh.cfs.filter(function (r) { return hit.indexOf(r) < 0; }); };
+  // rows inserted / deleted: conditional formats, heights and hidden rows move as in Excel
+  function shiftRows(sh, at, n) {
+    sh.cfs.forEach(function (rule) {
+      rule.areas = rule.areas.map(function (a) {
+        if (n > 0) { if (a.r1 >= at) { a.r1 += n; a.r2 += n; } else if (a.r2 >= at) a.r2 += n; return a; }
+        var lo = at, hi = at - n - 1;
+        if (a.r1 > hi) { a.r1 += n; a.r2 += n; return a; }
+        if (a.r2 < lo) return a;
+        var keep = (a.r2 - a.r1 + 1) - (Math.min(a.r2, hi) - Math.max(a.r1, lo) + 1);
+        if (keep <= 0) return null;
+        a.r1 = Math.min(a.r1, lo); a.r2 = a.r1 + keep - 1; return a;
+      }).filter(Boolean);
+    });
+    sh.cfs = sh.cfs.filter(function (r) { return r.areas.length; });
+    [sh.heights, sh.hidden].forEach(function (arr) { if (n > 0) { while (arr.length < at) arr.push(undefined); Array.prototype.splice.apply(arr, [at, 0].concat(new Array(n))); } else arr.splice(at, -n); });
+  }
   wb.get = function (name) { return wb.sheets.filter(function (s) { return s.name === name; })[0]; };
 
   function ensure(sh, r, c) {
@@ -126,9 +192,15 @@
     this.isNullObject = false;
     var self = this;
     // formats are recorded per range (wb.fmt) so a test can look at them
-    var fmt = { font: {}, fill: {}, autofitColumns: function () {}, autofitRows: function () {}, borders: { getItem: function (side) { var b = { side: side }; (wb.borders = wb.borders || []).push({ sheet: sh.name, r: r, c: c, nr: nr, nc: nc, b: b }); return b; } } };
+    var fmt = { load: function () { return this; }, font: {}, fill: {}, autofitColumns: function () {}, autofitRows: function () { autofit(sh, r, nr); }, borders: { getItem: function (side) { var b = { side: side }; (wb.borders = wb.borders || []).push({ sheet: sh.name, r: r, c: c, nr: nr, nc: nc, b: b }); return b; } } };
     (wb.fmt = wb.fmt || []).push({ sheet: sh.name, r: r, c: c, nr: nr, nc: nc, f: fmt });
     this.format = fmt;
+    Object.defineProperty(fmt, "rowHeight", {
+      get: function () { var h = null; for (var i = 0; i < Math.min(nr, 100000); i++) { var x = sh.heights[r + i] || 15; if (h === null) h = x; else if (h !== x) return null; } return h; },
+      set: function (v) { for (var i = 0; i < nr; i++) { sh.heights[r + i] = v; sh.hidden[r + i] = false; } wb.calls.push("rowHeight " + sh.name + " " + (r + 1) + "+" + nr + "=" + v); }
+    });
+    Object.defineProperty(this, "rowHidden", { get: function () { for (var i = 0; i < nr; i++) if (!sh.hidden[r + i]) return false; return true; } });
+    this.conditionalFormats = new CFCollection(sh, [{ r1: r, c1: c, r2: r + nr - 1, c2: c + nc - 1 }]);
     Object.defineProperty(this, "values", {
       get: function () {
         var out = [];
@@ -180,6 +252,19 @@
     });
   }
   Range.prototype.load = function () { return this; };
+  // Excel's autofit, roughly: 12.75 pt a line, ~22 characters a line in a column; merged cells don't count (as in Excel)
+  function autofit(sh, r, nr) {
+    for (var i = 0; i < nr; i++) {
+      var rr = r + i, lines = 1;
+      if (sh.hidden[rr]) wb.autofitHidden = (wb.autofitHidden || 0) + 1;
+      (sh.values[rr] || []).forEach(function (v, c) {
+        if (c > 33 || sh.merges.some(function (m) { return m.r1 <= rr && rr <= m.r2 && m.c1 <= c && c <= m.c2 && (m.r2 > m.r1 || m.c2 > m.c1); })) return;
+        lines = Math.max(lines, Math.ceil(String(evalCell(sh, rr, c, 0) || "").length / 22) || 1);
+      });
+      sh.heights[rr] = 12.75 * lines;
+    }
+    wb.calls.push("autofit " + sh.name + " " + (r + 1) + "+" + nr);
+  }
   Range.prototype.clear = function () {
     var sh = this._sh;
     for (var i = 0; i < this.rowCount; i++) for (var j = 0; j < this.columnCount; j++) {
@@ -198,7 +283,7 @@
     wb.calls.push("insertRows " + (at + 1) + "+" + n);
     while (sh.values.length < at) sh.values.push([]);
     var blank = []; for (var i = 0; i < n; i++) blank.push([]);
-    shiftRefs(sh, at, n);
+    shiftRefs(sh, at, n); shiftRows(sh, at, n);
     [sh.values, sh.formats, sh.f].forEach(function (a) { while (a.length < at) a.push([]); Array.prototype.splice.apply(a, [at, 0].concat(blank.map(function () { return []; }))); });
     sh.merges.forEach(function (m) {
       if (m.r1 >= at) { m.r1 += n; m.r2 += n; }
@@ -229,7 +314,7 @@
     if (!this._rows || dir !== "Up") throw new Error("mock: only whole rows, Up (got " + dir + ")");
     wb.calls.push("deleteRows " + (at + 1) + "+" + n);
     [sh.values, sh.formats, sh.f].forEach(function (a) { a.splice(at, n); });
-    shiftRefs(sh, at + n, -n);
+    shiftRefs(sh, at + n, -n); shiftRows(sh, at, -n);
     sh.merges = sh.merges.filter(function (m) {
       var lo = at, hi = at + n - 1;
       if (m.r1 > hi) { m.r1 -= n; m.r2 -= n; return true; }
@@ -309,7 +394,13 @@
     return new Range(sh, 0, 0, lastR + 1, lastC + 1);
   };
   Worksheet.prototype.getRangeByIndexes = function (r, c, nr, nc) { return new Range(this._sh, r, c, nr, nc); };
+  Worksheet.prototype.getRanges = function (addr) {
+    var sh = this._sh, boxes = parseBoxes(addr);
+    if (window.__noAreas) throw new Error("mock: RangeAreas off");
+    return { address: boxes.map(function (b) { return sh.name + "!" + boxText(b); }).join(", "), areaCount: boxes.length, conditionalFormats: new CFCollection(sh, boxes), load: function () { return this; } };
+  };
   Worksheet.prototype.getRange = function (addr) {
+    if (addr === undefined) return new Range(this._sh, 0, 0, 1048576, 16384);
     var cols = /^([A-Z]+):([A-Z]+)$/.exec(addr);
     if (cols) return new Range(this._sh, 0, colIdx(cols[1]), 1, colIdx(cols[2]) - colIdx(cols[1]) + 1);
     var rows = /^(\d+):(\d+)$/.exec(addr);
@@ -369,15 +460,16 @@
     sync: function () { wb.syncs = (wb.syncs || 0) + 1; if (window.__syncTrace) { var st = (new Error().stack || "").split("\n").filter(function (l) { return /taskpane\.js/.test(l); })[0] || "?"; (wb.syncAt = wb.syncAt || []).push(st.replace(/^\s*at\s*/, "").replace(/\(?https:\/\/addin\.test\/taskpane\.js[^:]*:(\d+):\d+\)?/, "@$1")); } return new Promise(function (r) { setTimeout(r, 1); }); }
   };
 
-  (window.__initialSheets || []).forEach(function (s) { wb.addSheet(s.name, s.values, s.formats, s.f, s.merges, s.filtered); });
+  (window.__initialSheets || []).forEach(function (s) { wb.addSheet(s.name, s.values, s.formats, s.f, s.merges, s.filtered, { cfs: s.cfs, heights: s.heights, hidden: s.hidden }); });
 
   window.Excel = {
     run: function (fn) { return Promise.resolve().then(function () { return fn(ctx); }); },
-    WorksheetPositionType: { after: "After", end: "End", before: "Before", beginning: "Beginning" }
+    WorksheetPositionType: { after: "After", end: "End", before: "Before", beginning: "Beginning" },
+    ConditionalFormatType: { custom: "Custom" }
   };
   window.Office = {
     HostType: { Excel: "Excel" },
-    context: { requirements: { isSetSupported: function () { return true; } } },
+    context: { requirements: { isSetSupported: function (n, v) { return !(window.__noApi && window.__noApi[n + " " + v]); } } },
     onReady: function (cb) { setTimeout(function () { cb({ host: "Excel" }); }, 0); }
   };
 })();

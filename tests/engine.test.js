@@ -284,7 +284,7 @@ test("a tab-separated row instead of JSON is recognised (Claude used another for
   const row = "A330-1-973\tOpen\t05 Nov 2026\tC1039\t43075600\t330-25-23-JC855-001-SM\t330-25-23-JC855\tA\t-\tINSTL - CEILING FR41 - FR53.3 [MCC]\tC41-C53.3, Y1047.8 / -1047.8\tShort edge margin";
   const r = E.parseAiPaste(row);
   assert.strictEqual(r.kind, "table");
-  assert.ok(/table row/.test(r.error));
+  assert.ok(/table/.test(r.error));
   assert.strictEqual(E.parseAiPaste("```\n" + row + "\n```").kind, "table", "also inside a code block");
   assert.strictEqual(E.parseAiPaste('[{"cdf_number":"A330-1-1","description":"A\tB\tC\tD"}]').kind, null, "tabs inside JSON are fine");
   assert.strictEqual(E.parseAiPaste("A330-1-961 ROUTINE TEXT").kind, "nojson");
@@ -448,5 +448,24 @@ test("buildEmail + mailto", () => {
   const url = E.mailtoUrl(["a@x.com", "b@y.org"], ["c@z.com"], "Subj & more", "line1\r\nline2");
   assert.strictEqual(url, "mailto:a@x.com;b@y.org?cc=c%40z.com&subject=Subj%20%26%20more&body=line1%0D%0Aline2");
 });
+
+// ---- 1.9.4: rows from any AI or from Excel, not only the add-in's JSON objects ----
+{
+  const R = ["A330-1-978", "", "", "08/11/2026", "ROUTINE", "WIRING PRESSES THE PANEL.", "OEM AVIONICS", "88525-10-AV", "INSTL - INTERCOM", "C1016", "A", "", "Dana Levi"];
+  const one = (t) => E.parseAiPaste(t).items[0] || {};
+  test("parseAiPaste: rows of values (CDF first, as ChatGPT gives them)", () => { const i = one(JSON.stringify([R])); assert.deepStrictEqual([i.cdf_number, i.form_date, i.code, i.drawing_rev, i.technical_adviser], ["A330-1-978", "08/11/2026", "C1016", "A", "Dana Levi"]); });
+  test("parseAiPaste: rows of values say how they were read", () => assert.ok(one(JSON.stringify([R])).flags.some((f) => /without field names/.test(f))));
+  test("parseAiPaste: the add-in's own order (files first)", () => { const r = ["", "", "A330-1-979.-"].concat(R.slice(3)); assert.strictEqual(one(JSON.stringify([r])).cdf_number, "A330-1-979.-"); });
+  test("parseAiPaste: 11 values (no files)", () => { const r = [R[0]].concat(R.slice(3)); const i = one(JSON.stringify([r])); assert.deepStrictEqual([i.cdf_number, i.priority, i.technical_adviser], ["A330-1-978", "ROUTINE", "Dana Levi"]); });
+  test("parseAiPaste: the CDF sheet's 15 columns put the revision back on the number", () => { const r = ["A330-1-978", "", "", "B", "", "08/11/2026", "ROUTINE", "X", "OEM", "D", "N", "C1", "-", "A", "B"]; assert.strictEqual(one(JSON.stringify([r])).cdf_number, "A330-1-978.B"); });
+  test("parseAiPaste: a header row names the columns", () => { const t = JSON.stringify([["CDF", "Description", "Priority", "Adviser"], ["A330-1-978", "X", "AOG", "Dana Levi"]]); const i = one(t); assert.deepStrictEqual([i.cdf_number, i.priority, i.technical_adviser], ["A330-1-978", "AOG", "Dana Levi"]); });
+  test("parseAiPaste: rows copied from Excel (tabs)", () => assert.strictEqual(E.parseAiPaste(R.join("\t") + "\n" + R.join("\t").replace("978", "979")).items.length, 2));
+  test("parseAiPaste: ChatGPT's 'json / Copy code' label around the block", () => assert.strictEqual(one("json\nCopy code\n" + JSON.stringify([R])).cdf_number, "A330-1-978"));
+  test("parseAiPaste: Python-style single quotes", () => assert.strictEqual(one("[['A330-1-978', '', '', '08/11/2026', 'ROUTINE', 'X', 'OEM', 'D', 'N', 'C1', '-', '', 'Dana Levi']]").technical_adviser, "Dana Levi"));
+  test("parseAiPaste: // comment lines and a trailing comma", () => assert.strictEqual(one("[\n// new rows\n" + JSON.stringify(R) + ",\n]").cdf_number, "A330-1-978"));
+  test("parseAiPaste: 13 values but no date where the date goes → not misread", () => { const r = R.slice(); r[3] = "Open"; assert.ok(E.parseAiPaste(JSON.stringify([r])).error); });
+  test("parseAiPaste: values in an order that can't be told → a clear error", () => assert.match(E.parseAiPaste(JSON.stringify([["x", "y", "A330-1-978", "z"]])).error, /order the add-in can't tell/));
+  test("parseAiPaste: objects with names still read as before", () => assert.strictEqual(one(JSON.stringify([{ cdf_number: "A330-1-978.-", description: "X" }])).cdf_number, "A330-1-978.-"));
+}
 
 console.log(`\n${passed} tests passed` + (process.exitCode ? " — SOME FAILED" : ""));

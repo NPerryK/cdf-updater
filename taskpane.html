@@ -5,16 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CDF Updater</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-  <script src="lib/jszip.min.js?v=1.9.3"></script>
-  <script src="engine.js?v=1.9.3"></script>
-  <script src="cdf-algo.js?v=1.9.3"></script>
-  <script src="cdf-mantra.js?v=1.9.3"></script>
-  <script src="cdf-summary.js?v=1.9.3"></script>
-  <script src="cdf-history.js?v=1.9.3"></script>
-  <script src="cdf-link.js?v=1.9.3"></script>
-  <script src="features.js?v=1.9.3"></script>
-  <script src="prompt.js?v=1.9.3"></script>
-  <link rel="stylesheet" href="taskpane.css?v=1.9.3">
+  <script src="lib/jszip.min.js?v=1.10.0"></script>
+  <script src="engine.js?v=1.10.0"></script>
+  <script src="cdf-algo.js?v=1.10.0"></script>
+  <script src="cdf-mantra.js?v=1.10.0"></script>
+  <script src="cdf-summary.js?v=1.10.0"></script>
+  <script src="cdf-history.js?v=1.10.0"></script>
+  <script src="cdf-link.js?v=1.10.0"></script>
+  <script src="features.js?v=1.10.0"></script>
+  <script src="prompt.js?v=1.10.0"></script>
+  <script src="cdf-look.js?v=1.10.0"></script>
+  <link rel="stylesheet" href="taskpane.css?v=1.10.0">
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -38,7 +39,7 @@
         <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg>
       </span>
       <div class="brand">
-        <h1>CDF Updater <span id="appVersion" class="ver" title="Add-in version">v1.9.3</span></h1>
+        <h1>CDF Updater <span id="appVersion" class="ver" title="Add-in version">v1.10.0</span></h1>
         <p>A330-300 P2F deviation tracker</p>
       </div>
       <button id="lookupOpen" class="deck-btn" type="button" title="Find a CDF (Ctrl+F)" aria-label="Find a CDF"><svg class="ico"><use href="#i-find"/></svg></button>
@@ -58,6 +59,7 @@
     <button class="key on" id="tab-today" role="tab" aria-selected="true" aria-controls="page-today" data-page="today" type="button"><span class="key-light"></span>TODAY</button>
     <button class="key" id="tab-newrows" role="tab" tabindex="-1" aria-selected="false" aria-controls="page-newrows" data-page="newrows" type="button"><span class="key-light"></span>NEW ROWS</button>
     <button class="key" id="tab-email" role="tab" tabindex="-1" aria-selected="false" aria-controls="page-email" data-page="email" type="button"><span class="key-light"></span>EMAIL</button>
+    <button class="key" id="tab-look" role="tab" tabindex="-1" aria-selected="false" aria-controls="page-look" data-page="look" type="button"><span class="key-light"></span>LOOK</button>
     <button class="key" id="tab-setup" role="tab" tabindex="-1" aria-selected="false" aria-controls="page-setup" data-page="setup" type="button"><span class="key-light"></span>SETUP</button>
   </nav>
 
@@ -213,6 +215,54 @@
       </section>
     </section>
 
+    <!-- ================= LOOK ================= -->
+    <section class="page" id="page-look" role="tabpanel" aria-labelledby="tab-look">
+      <section class="card" id="sheetLookCard">
+        <div class="card-head">
+          <h2>Sheet look</h2>
+          <span class="step-state" id="lookState"></span>
+        </div>
+        <p class="hint">The look the algorithm gives sheet CDF (110.6–110.7): S:X in purple, a thin black line around every cell, Released rows green, Cancelled rows red, a line over every solution row. Every Apply redoes it; repaint by hand after editing the sheet yourself.</p>
+        <div class="look-legend" aria-hidden="true">
+          <span class="lg"><i style="background:#60497A"></i>S:X</span>
+          <span class="lg"><i style="background:#00B050"></i>Released</span>
+          <span class="lg"><i style="background:#FF0000"></i>Cancelled</span>
+          <span class="lg"><i class="lg-line"></i>solution row</span>
+        </div>
+        <button id="repaintBtn" class="btn primary wide" type="button">Repaint CDF</button>
+        <div id="repaintMsg"></div>
+      </section>
+
+      <section class="card" id="aiLookCard">
+        <div class="card-head">
+          <h2>Ask ChatGPT or Claude</h2>
+        </div>
+        <p class="hint">Write what should stand out. Only the column names go with the request, not the sheet's data. The answer is a rule the add-in checks here first: you see how many rows it paints before anything changes.</p>
+        <label class="fld" for="lookAsk">What should stand out?</label>
+        <textarea id="lookAsk" class="inp" rows="2" spellcheck="true" placeholder="e.g. orange: open CDFs waiting at Final Approval for more than 7 days"></textarea>
+        <div class="flow">
+          <button id="lookCopy" class="btn wide" type="button"><svg class="ico"><use href="#i-copy"/></svg>Copy request</button>
+          <div class="row look-open">
+            <button id="openChatGpt" class="btn ghost" type="button"><svg class="ico"><use href="#i-out"/></svg>Open ChatGPT</button>
+            <button id="openClaudeLook" class="btn ghost" type="button"><svg class="ico"><use href="#i-out"/></svg>Open Claude</button>
+          </div>
+          <p class="flow-hint">Paste the request in a new chat in either one and send.</p>
+          <div id="lookCopyMsg" class="msg"></div>
+        </div>
+        <label class="fld" for="lookPaste">The answer</label>
+        <textarea id="lookPaste" class="inp paste" rows="3" spellcheck="false" placeholder="Click Copy on the code block in the answer and paste it here. It's read as soon as you paste."></textarea>
+        <div id="lookPreview"></div>
+      </section>
+
+      <section class="card" id="savedLooksCard">
+        <div class="card-head">
+          <h2>Looks in this workbook</h2>
+          <span class="step-state" id="looksCount"></span>
+        </div>
+        <div id="savedLooks"><p class="hint">None yet. A look you add is kept in this workbook and painted again after every Apply.</p></div>
+      </section>
+    </section>
+
     <!-- ================= SETUP ================= -->
     <section class="page" id="page-setup" role="tabpanel" aria-labelledby="tab-setup">
       <section class="card">
@@ -317,6 +367,6 @@
     <button id="abPrimary" class="btn ab-btn hidden" type="button"></button>
   </footer>
 
-  <script src="taskpane.js?v=1.9.3"></script>
+  <script src="taskpane.js?v=1.10.0"></script>
 </body>
 </html>

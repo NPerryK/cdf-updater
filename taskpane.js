@@ -84,6 +84,13 @@
     $("pasteBox").addEventListener("paste", onPaste);
     $("pasteBox").addEventListener("input", function () { $("pasteBox").classList.remove("read"); $("pasteMsg").textContent = ""; refreshButtons(); });
     $("parsePaste").addEventListener("click", parsePasted);
+    $("repaintBtn").addEventListener("click", function () { repaintNow({}, "repaintMsg", "Sheet look ✓"); });
+    $("lookCopy").addEventListener("click", copyLookRequest);
+    $("openChatGpt").addEventListener("click", function () { openUrl("https://chatgpt.com/"); });
+    $("openClaudeLook").addEventListener("click", function () { openUrl("https://claude.ai/new"); });
+    $("lookPaste").addEventListener("paste", onLookPaste);
+    $("lookPaste").addEventListener("input", function () { clearTimeout(state.lookTimer); state.lookTimer = setTimeout(readLookAnswer, 400); });
+    $("rulesPill").addEventListener("click", function () { if (state.rules && state.rules.errors.length) showPage("setup"); });   // the red light leads to its reason
     // email
     $("mailKind").addEventListener("change", function () { $("mailSubject").value = defaultSubject(); $("mailPreview").innerHTML = ""; state.mail = null; renderKindHint(); });
     $("mailBuild").addEventListener("click", buildMail);
@@ -207,8 +214,9 @@
     state.loadedAt = new Date();
     state.lastPreview = null;
     $("results").innerHTML = "";
-    var errs = state.rules.errors.length;
-    setPill(errs ? "RULES " + errs + " ERR" : "RULES OK", errs ? "bad" : "ok");
+    var errs = state.rules.errors.length, onlySettings = errs && state.rules.errors.every(function (e) { return e.setting; });
+    setPill(onlySettings ? "SETTINGS MISSING" : errs ? "RULES " + errs + " ERR" : "RULES OK", errs ? "bad" : "ok");
+    if (errs) $("rulesPill").title = onlySettings ? "Three people lines are missing from the workbook settings — click to open SETUP" : "Click to see the errors in SETUP";
     if (!errs && state.rules.privateLines) $("rulesPill").title = "rules.txt + " + state.rules.privateLines + " lines of workbook settings, no errors";
     renderLamps();
     renderRules(); renderSlots(); renderAlgos(); renderExtras(); refreshButtons();
@@ -564,6 +572,7 @@
         mantraStage(res, data, rules.cdfConfig);
         historyStage(res, data, rules.cdfConfig, now);
         reportsStage(res, data, rules.cdfConfig, now);
+        res.lookPlan = window.CdfLook ? window.CdfLook.lookPlan(finalCdfOf(res, data), window.CdfAlgo) : null;
         if (!apply) return res;
         if (res.errors.some(function (e) { return e.stage === "00.1"; })) throw new Error("Headers don't match the algorithm — nothing was written.");
         var cdfWs = ctx.workbook.worksheets.getItem("CDF"), gccWs = ctx.workbook.worksheets.getItem("GCC");
@@ -589,6 +598,11 @@
           return writeChanges(ctx, gccWs, res.gccChanges);
         }).then(function () {
           return writeChanges(ctx, cdfWs, res.cdfChanges);
+        }).then(function () {
+          // 110.6–110.7 on the sheet as the update left it; a look that can't be painted is reported, not thrown
+          setStatus("Painting sheet CDF…");
+          return lookPass(ctx, cdfWs, finalCdfOf(res, data), { fresh: freshRows(res.rowOps) })
+            .then(function (rep) { res.look = rep; state.lookValues = finalCdfOf(res, data); }, function (e) { res.look = { error: errText(e) }; });
         }).then(function () {
           return writeReports(ctx, res.reports);
         }).then(function () {
@@ -1172,6 +1186,248 @@
     }).filter(Boolean);
   }
 
+  // ================= the look of sheet CDF (110.6–110.7) and the looks from ChatGPT / Claude =================
+  var LK = window.CdfLook, NS_LOOKS = "urn:cdf-updater:looks:v1";
+  var BORDER_SIDES = ["EdgeTop", "EdgeBottom", "EdgeLeft", "EdgeRight", "InsideVertical", "InsideHorizontal"];
+  // values: sheet CDF as it is now (in memory after an update, or read). opt.fresh: rows this update added (they
+  // fit their text); opt.drop: formulas of looks just removed (their rules go too). 4 round trips + row heights.
+  function lookPass(ctx, ws, values, opt) {
+    opt = opt || {};
+    var plan = LK.lookPlan(values, window.CdfAlgo);
+    if (!plan) return Promise.resolve({ skipped: "Sheet CDF has nothing below the header row." });
+    var canAreas = Office.context.requirements.isSetSupported("ExcelApi", "1.9");
+    var looks = state.looks || [], lookFormulas = looks.map(function (l) { return l.formula; }).concat(opt.drop || []);
+    var last = plan.last, rep = { last: last, cont: plan.cont.length, looks: looks.length, rules: 0 };
+    var nf = ws.getRange(plan.body), cfs = ws.getRange().conditionalFormats, before = [], after = {};
+    var rowJob = function (r, list) {
+      var rg = ws.getRange(r + ":" + r);
+      return { cells: 20, queue: function () { rg.load("rowHidden"); rg.format.load("rowHeight"); }, done: function () { list(r, rg); } };
+    };
+    var reads = [{ cells: (last - 1) * 34, queue: function () { nf.load("numberFormat"); cfs.load("items/type"); } }];
+    for (var r = 2; r <= last; r++) reads.push(rowJob(r, function (row, rg) { before.push({ row: row, height: rg.format.rowHeight, hidden: !!rg.rowHidden }); }));
+    var custom = [];
+    return roundTrips(ctx, reads, READ_BUDGET).then(function () {
+      cfs.items.forEach(function (cf) {
+        if (cf.type !== "Custom") return;
+        var x = { cf: cf, rule: cf.custom.rule, ranges: canAreas ? cf.getRangesOrNullObject() : null };
+        x.rule.load("formula"); if (x.ranges) x.ranges.load("areaCount");
+        custom.push(x);
+      });
+      return ctx.sync();
+    }).then(function () {
+      var found = custom.map(function (x) { return { formula: x.rule.formula, areas: x.ranges && !x.ranges.isNullObject ? x.ranges.areaCount : 1 }; });
+      rep.found = LK.describeExisting(found, lookFormulas);
+      // 110.7 and the saved looks are written again from scratch: one clean rule each; the user's own rules stay
+      custom.forEach(function (x) { if (LK.ruleKind(x.rule.formula, lookFormulas)) x.cf.delete(); });
+      // 110.6
+      var f = ws.getRange(plan.all).format;
+      f.font.name = "Calibri"; f.font.size = 10; f.verticalAlignment = "Center"; f.wrapText = true;
+      BORDER_SIDES.forEach(function (sd) { var b = f.borders.getItem(sd); b.style = "Continuous"; b.weight = "Thin"; b.color = LK.BLACK; });
+      var p = ws.getRange(plan.purple).format; p.fill.color = LK.PURPLE; p.font.color = LK.WHITE;
+      var hidden = LK.hiddenFormatCells(nf.numberFormat, 2);
+      hidden.forEach(function (h) { ws.getRange(h.a1).numberFormat = [["General"]]; });
+      rep.unhidden = hidden.length;
+      // 110.7 + looks, top rule first
+      var added = [];
+      function addRule(addresses, formula, look) {
+        addresses.forEach(function (addr) {
+          var targets = addr.indexOf(",") < 0 ? [ws.getRange(addr)] : canAreas ? [ws.getRanges(addr)] : addr.split(",").map(function (a) { return ws.getRange(a.trim()); });
+          targets.forEach(function (t) {
+            var cf = t.conditionalFormats.add(Excel.ConditionalFormatType.custom), c = cf.custom;
+            c.rule.formula = formula;
+            if (look.fill) c.format.fill.color = look.fill;
+            if (look.font) c.format.font.color = look.font;
+            if (look.bold) c.format.font.bold = true;
+            if (look.italic) c.format.font.italic = true;
+            if (look.top) { var b = c.format.borders.getItem("EdgeTop"); b.style = "Continuous"; b.color = look.top; }
+            added.push(cf);
+          });
+        });
+      }
+      plan.rules.forEach(function (ru) { addRule(ru.areas, ru.formula, ru); });
+      looks.forEach(function (lk) { var a = LK.paintAreas(lk.spans, last); addRule([a.join(", ")], lk.formula, lk); });
+      added.forEach(function (cf, i) { cf.priority = i; });
+      rep.rules = added.length; rep.split = !canAreas;
+      // heights: autofit the rows a filter doesn't hide, then read them again
+      var runs = LK.visibleRuns(before);
+      runs.forEach(function (run) { ws.getRange(run[0] + ":" + run[1]).format.autofitRows(); });
+      rep.fitted = before.filter(function (b) { return !b.hidden; }).length; rep.hiddenRows = before.length - rep.fitted;
+      var jobs = before.filter(function (b) { return !b.hidden; }).map(function (b) { return rowJob(b.row, function (row, rg) { after[row] = rg.format.rowHeight; }); });
+      if (!jobs.length) return ctx.sync();
+      return roundTrips(ctx, jobs, READ_BUDGET);
+    }).then(function () {
+      var back = LK.restoreHeights(before, after, opt.fresh);
+      back.forEach(function (b) { ws.getRange(b.row + ":" + b.row).format.rowHeight = b.height; });
+      rep.kept = back.length;
+      rep.grew = before.filter(function (b) { return !b.hidden && typeof after[b.row] === "number" && after[b.row] > b.height + 0.01; }).length;
+      return ctx.sync();
+    }).then(function () { return rep; });
+  }
+  // the look again, from the sheet as it is now (LOOK page, after NEW ROWS, after an undo)
+  function repaintIn(ctx, opt) {
+    return readSheets(ctx, ["CDF"], {}).then(function (rd) {
+      if (!rd.sheets.CDF) throw new Error("Sheet \"CDF\" was not found in this workbook");
+      return lookPass(ctx, ctx.workbook.worksheets.getItem("CDF"), rd.sheets.CDF.values, opt).then(function (rep) { state.lookValues = rd.sheets.CDF.values; return rep; });
+    });
+  }
+  function freshRows(ops) {
+    var out = [];
+    (ops || []).forEach(function (o) { if (o.kind === "insert") for (var i = 0; i < o.count; i++) out.push(o.finalFirst + i); });
+    return out;
+  }
+  function lookReportHtml(rep, title, brief) {
+    if (!rep) return "";
+    if (brief && !rep.error && !rep.skipped) return '<div class="note ok look-report"><b>' + esc(brief) + "</b> " + esc(title) + "</div>";
+    if (rep.error) return '<div class="note warn look-report">' + esc(title || "Sheet look") + ": couldn't be repainted — " + esc(rep.error) + ". The update itself is written; try <b>Repaint CDF</b> on the LOOK page.</div>";
+    if (rep.skipped) return '<div class="note look-report">' + esc(rep.skipped) + "</div>";
+    var fd = rep.found || { pieces: {}, broken: [] }, li = [];
+    li.push("Rows 2–" + rep.last + ": Calibri 10, black lines around every cell, S:X purple, Middle Align, Wrap Text.");
+    var fixed = (fd.broken || []).map(function (k) { return (k === "cont" ? "solution-row lines" : capFirst(k)) + " (" + fd[k] + " rule" + (fd[k] === 1 ? "" : "s") + ", " + fd.pieces[k] + " pieces)"; });
+    li.push("Released green, Cancelled red and the line over " + plural(rep.cont, "solution row") + (fixed.length ? " — were split: " + esc(fixed.join(", ")) + "; now one rule each." : " — one rule each."));
+    if (rep.looks) li.push(plural(rep.looks, "saved look") + " painted again.");
+    if (rep.grew) li.push(plural(rep.grew, "row") + " grew to fit " + (rep.grew === 1 ? "its" : "their") + " text" + (rep.kept ? "; " + plural(rep.kept, "taller row") + " kept " + (rep.kept === 1 ? "its" : "their") + " height" : "") + ".");
+    else if (rep.kept) li.push(plural(rep.kept, "taller row") + " kept " + (rep.kept === 1 ? "its" : "their") + " height (rows never shrink, so text in merged cells stays visible).");
+    if (rep.hiddenRows) li.push(plural(rep.hiddenRows, "row") + " hidden by a filter kept " + (rep.hiddenRows === 1 ? "its" : "their") + " height.");
+    if (rep.unhidden) li.push(plural(rep.unhidden, "cell") + " with the hidden format ;;; now " + (rep.unhidden === 1 ? "shows its" : "show their") + " value.");
+    if (fd.ownRules) li.push("Kept " + plural(fd.ownRules, "conditional format") + " of your own.");
+    if (rep.split) li.push("This Excel can't put one rule on several ranges, so the solution-row line is " + plural(rep.rules - 2 - rep.looks, "rule") + ".");
+    return '<div class="note ok look-report"><b>' + esc(title || "Sheet look ✓") + "</b><ul>" + li.map(function (x) { return "<li>" + x + "</li>"; }).join("") + "</ul></div>";
+  }
+  // Check changes: what Apply will paint (nothing is read for it)
+  function lookPlanHtml(res, applied) {
+    if (applied) return lookReportHtml(res.look, "Sheet look ✓");
+    var p = res.lookPlan;
+    if (!p) return "";
+    var n = (state.looks || []).length;
+    return '<div class="note look-report">At Apply, the look of rows 2–' + p.last + " (110.6–110.7): Released green, Cancelled red, a line over " + plural(p.cont.length, "solution row") + (n ? ", " + plural(n, "saved look") : "") + ".</div>";
+  }
+
+  // ---- LOOK page
+  function renderLookPage() {
+    var list = state.looks || [];
+    $("looksCount").textContent = list.length ? String(list.length) : "";
+    var box = $("savedLooks");
+    if (!list.length) { box.innerHTML = '<p class="hint">None yet. A look you add is kept in this workbook and painted again after every Apply.</p>'; return; }
+    var today = LK.todaySerial(new Date()), vals = state.lookValues;
+    box.innerHTML = list.map(function (lk, i) {
+      var n = vals ? LK.matchRows(lk, vals, today).length : null;
+      return '<div class="look-item">' + swatchHtml(lk) + '<div><div class="ln">' + esc(lk.name) + '</div><div class="lw">' + esc(lk.say) + "</div></div>" +
+        '<div class="lm">Cells ' + esc(lk.cells) + (n == null ? "" : " · <b>" + plural(n, "row") + "</b> now") + "</div>" +
+        '<div class="acts"><button class="btn ghost small" type="button" data-unlook="' + i + '">Remove</button></div></div>';
+    }).join("");
+    Array.prototype.forEach.call(box.querySelectorAll("[data-unlook]"), function (b) { b.addEventListener("click", function () { removeLook(+b.getAttribute("data-unlook")); }); });
+  }
+  function swatchHtml(lk) {
+    var st = "background:" + (lk.fill || "#FFFFFF") + ";color:" + (lk.font || "#000000") + (lk.bold ? ";font-weight:800" : ";font-weight:400") + (lk.italic ? ";font-style:italic" : "");
+    return '<span class="swatch" style="' + st + '" aria-hidden="true">Aa</span>';
+  }
+  function lookMsg(id, cls, html) { var m = $(id); m.className = "msg " + (cls || ""); m.innerHTML = html; }
+  // the columns as the prompt names them: header and kind (text / number / date) from the first 200 rows — no values
+  function lookColumns() {
+    if (state.lookCols) return Promise.resolve(state.lookCols);
+    if (!state.inExcel) return Promise.resolve(null);
+    return Excel.run(function (ctx) {
+      var ws = ctx.workbook.worksheets.getItemOrNullObject("CDF");
+      return ctx.sync().then(function () {
+        if (ws.isNullObject) throw new Error("Sheet \"CDF\" was not found in this workbook");
+        var rg = ws.getRange("A1:AH201"); rg.load("values,numberFormat");
+        return ctx.sync().then(function () {
+          var kinds = LK.columnKinds(rg.values.slice(1), rg.numberFormat.slice(1), isDateFormat);
+          state.lookCols = rg.values[0].map(function (h, c) { return { letter: LK.letter(c), header: String(h == null ? "" : h), kind: kinds[c] }; });
+          return state.lookCols;
+        });
+      });
+    });
+  }
+  function lookHeaders() { return (state.lookCols || []).map(function (c) { return c.header; }); }
+  function copyLookRequest() {
+    var ask = $("lookAsk").value.trim();
+    if (!ask) { lookMsg("lookCopyMsg", "bad", "Write first what should stand out."); $("lookAsk").focus(); return; }
+    lookColumns().then(function (cols) {
+      var prompt = LK.buildPrompt(ask, cols || []);
+      return copyText(prompt).then(function (ok) {
+        lookMsg("lookCopyMsg", ok ? "ok" : "bad", ok ? "Request copied ✓ — paste it in ChatGPT or Claude (" + (cols ? cols.length + " column names, no values" : "column names unknown outside Excel") + ")." : "Copy failed here — click the button again.");
+      });
+    }).catch(function (e) { lookMsg("lookCopyMsg", "bad", esc(errText(e))); });
+  }
+  function onLookPaste(ev) {
+    var text = ev && ev.clipboardData && ev.clipboardData.getData("text/plain");
+    if (text) { ev.preventDefault(); $("lookPaste").value = text; }
+    setTimeout(readLookAnswer, 0);
+  }
+  function readLookAnswer() {
+    var text = $("lookPaste").value, box = $("lookPreview");
+    if (!text.trim()) { box.innerHTML = ""; state.lookDraft = null; return; }
+    var cols = state.inExcel ? lookColumns().catch(function () { return null; }) : Promise.resolve(null);
+    cols.then(function () {
+      var res = LK.parseLooks(text, lookHeaders(), E);
+      if (res.error) { state.lookDraft = null; box.innerHTML = '<div class="note bad">' + esc(res.error) + (res.kind === "invalid" || res.kind === "nojson" ? ' Ask in the same chat: "Answer again with only the json block, in the format I gave."' : "") + "</div>"; return; }
+      state.lookDraft = res.looks;
+      return lookValues().then(function (vals) {
+        var today = LK.todaySerial(new Date()), A = window.CdfAlgo;
+        box.innerHTML = res.looks.map(function (lk) {
+          var rows = vals ? LK.matchRows(lk, vals, today) : null, keys = matchKeys(rows, vals);
+          return '<div class="look-item">' + swatchHtml(lk) + '<div><div class="ln">' + esc(lk.name) + '</div><div class="lw">' + esc(lk.say) + "</div></div>" +
+            '<div class="lm">Cells ' + esc(lk.cells) + (rows ? " · <b>" + plural(rows.length, "row") + "</b> now" + (keys.list.length ? ": " + esc(keys.list.join(", ")) + (keys.more ? " …" : "") : "") : "") + "</div>" +
+            '<details><summary>Excel rule</summary><code>' + esc(lk.formula) + "</code></details></div>";
+        }).join("") +
+          '<div class="row" style="margin-top:10px"><button id="lookAdd" class="btn primary" type="button">' + (res.looks.length > 1 ? "Add " + res.looks.length + " looks" : "Add to the sheet") + '</button><button id="lookDiscard" class="btn ghost" type="button">Discard</button></div>' +
+          (state.inExcel ? "" : '<p class="hint">Outside Excel: the rule is read, but rows can only be counted and painted inside Excel.</p>') + '<div id="lookAddMsg"></div>';
+        $("lookAdd").disabled = !state.inExcel || state.busy;
+        $("lookAdd").addEventListener("click", addLooks);
+        $("lookDiscard").addEventListener("click", function () { $("lookPaste").value = ""; box.innerHTML = ""; state.lookDraft = null; });
+      });
+    });
+  }
+  // the CDFs behind matched rows, each once (a solution row counts as its CDF): "901, 902 …"
+  function matchKeys(rows, vals) {
+    if (!rows || !vals) return { list: [], more: false };
+    var A = window.CdfAlgo, of = {}, seen = {}, list = [];
+    A.buildBlocks(vals).forEach(function (b) { b.rows.forEach(function (r) { of[r + 1] = b.key; }); });
+    rows.forEach(function (r) { var k = of[r] || "row " + r; if (!seen[k]) { seen[k] = 1; list.push(String(k).replace(/^A330-1-/, "").replace(/\.-$/, "")); } });
+    return { list: list.slice(0, 5), more: list.length > 5 };
+  }
+  function lookValues() {
+    if (!state.inExcel) return Promise.resolve(null);
+    return Excel.run(function (ctx) { return readSheets(ctx, ["CDF"], {}).then(function (rd) { state.lookValues = rd.sheets.CDF ? rd.sheets.CDF.values : null; return state.lookValues; }); }).catch(function () { return null; });
+  }
+  function saveLooks() { return writeStore(NS_LOOKS, { looks: (state.looks || []).map(LK.toStored), savedAt: new Date().toISOString() }); }
+  function repaintNow(opt, msgId, title, brief) {
+    if (state.busy) return Promise.resolve();
+    state.busy = true; refreshButtons(); setStatus("Painting sheet CDF…");
+    return Excel.run(function (ctx) { return repaintIn(ctx, opt); }).then(function (rep) {
+      $(msgId).innerHTML = lookReportHtml(rep, typeof brief === "function" ? brief() : title, typeof brief === "function" ? title : null); renderLookPage(); return rep;
+    }).catch(function (e) { $(msgId).innerHTML = '<div class="note bad">' + esc(errText(e)) + "</div>"; })
+      .then(function (rep) { state.busy = false; clearStatus(); refreshButtons(); return rep; });
+  }
+  function addLooks() {
+    var draft = state.lookDraft;
+    if (!draft || !draft.length) return;
+    var stamp = new Date().toISOString();
+    var prev = (state.looks || []).slice();
+    state.looks = prev.concat(draft.map(function (l) { l.addedAt = stamp; return l; }));
+    saveLooks().then(function () {
+      return repaintNow({}, "lookAddMsg", (draft.length > 1 ? draft.length + " looks" : "Look") + " added ✓", function () {
+        var today = LK.todaySerial(new Date()), n = state.lookValues ? draft.reduce(function (t, l) { return t + LK.matchRows(l, state.lookValues, today).length; }, 0) : null;
+        return (n == null ? "" : plural(n, "row") + " painted now. ") + "Kept in this workbook and painted again after every Apply.";
+      });
+    }).then(function () {
+      state.lookDraft = null; $("lookPaste").value = "";
+      setTimeout(function () { var m = $("lookAddMsg"); $("lookPreview").innerHTML = ""; if (m) $("lookPreview").appendChild(m); }, 0);
+    }).catch(function (e) { state.looks = prev; $("lookAddMsg").innerHTML = '<div class="note bad">Not added — ' + esc(errText(e)) + "</div>"; });
+  }
+  function removeLook(i) {
+    var prev = (state.looks || []).slice(), gone = prev[i];
+    if (!gone) return;
+    state.looks = prev.filter(function (x, j) { return j !== i; });
+    saveLooks().then(function () { return repaintNow({ drop: [gone.formula] }, "repaintMsg", "“" + gone.name + "” removed ✓", function () { return "Its rule is off the sheet."; }); })
+      .catch(function (e) { state.looks = prev; $("repaintMsg").innerHTML = '<div class="note bad">Not removed — ' + esc(errText(e)) + "</div>"; renderLookPage(); });
+  }
+  function loadLooks(x) {
+    state.looks = ((x && x.looks) || []).map(function (s) { return LK.fromStored(s, lookHeaders()); }).filter(Boolean);
+    renderLookPage();
+  }
+
   function renderCdfResults(res, applied) {
     state.lastRes = res; state.lastResAt = Date.now(); state.lastApplied = applied; state.filter = {};
     var all = res.gccChanges.concat(res.cdfChanges), nChanges = all.length, nCdf = countKeys(all.concat(res.rowOps || []));
@@ -1201,6 +1457,7 @@
       tile(res.warnings.length, "Warnings", res.warnings.length ? "warnt" : "") + "</div>";
 
     html += mantraHtml(res, applied);
+    html += lookPlanHtml(res, applied);
     html += historyHtml(res, applied);
     html += reportsHtml(res, applied);
     if (applied && work) html += '<div class="note ok">Update written ✓' + (state.rules.log ? " — every change and its previous value is in sheet <b>" + esc(state.rules.log) + "</b>." : "") +
@@ -1925,6 +2182,7 @@
     items.forEach(function (it) { seen[it.fields.prompt_version || ""] = true; });
     var vs = Object.keys(seen);
     if (vs.length === 1 && vs[0] === cur) return null;
+    if (vs.length === 1 && vs[0] === "") return null;            // a reply from any AI or from Excel, without the add-in's prompt: nothing to compare
     var old = vs.filter(function (v) { return v && v !== cur; });
     if (old.length) return "This reply was made with older instructions (version " + old.join(", ") + "; current " + cur + "). " +
       "Check the fields carefully, and update the project's instructions so the next reply follows the current ones.";
@@ -2094,6 +2352,9 @@
         });
         return ctx.sync().then(function () {
           return state.rules.log && log.length ? appendLog(ctx, state.rules.log, log) : null;
+        }).then(function () {
+          if (plan.wsName !== "CDF") return null;
+          return repaintIn(ctx, { fresh: done.map(function (d) { return d.row; }) }).catch(function () { return null; });   // the look waits for the next Apply
         }).then(function () { return done; });
       });
     }).then(function (done) { state.batch = null; showWritten(done); })
@@ -2212,6 +2473,8 @@
         var log = writeEntryCells(ws, ws.name, entry, stamp);
         return ctx.sync().then(function () {
           return state.rules.log && log.length ? appendLog(ctx, state.rules.log, log) : null;
+        }).then(function () {
+          return ws.name === "CDF" ? repaintIn(ctx, { fresh: [row] }).catch(function () { return null; }) : null;
         }).then(function () { return log.length; });
       });
     }).then(function (n) {
@@ -2570,6 +2833,7 @@
     });
     Array.prototype.forEach.call(document.querySelectorAll("main > .page"), function (p) { p.classList.toggle("on", p.id === "page-" + name); });
     if (name === "newrows" || name === "email") keyDot(name, null);
+    if (name === "look") { renderLookPage(); if (state.inExcel && (state.looks || []).length && !state.lookValues) lookValues().then(renderLookPage); }
     updateActionBar();
     try { window.scrollTo(0, 0); } catch (e) { /* ignore */ }
   }
@@ -2634,7 +2898,8 @@
       state.myNotesAt = (n && n.pastedAt) || null;
       adoptSharedNotes();
       renderLink();
-    });
+      return readStore(NS_LOOKS);
+    }).then(function (lk) { loadLooks(lk); });
   }
 
   // ---------------- today at a glance (upper ECAM display) ----------------
@@ -2991,6 +3256,10 @@
       runsReady.forEach(function (o) { ctx.workbook.worksheets.getItem(o.sheet).getRange("E" + o.row).values = [["FAILED"]]; });
       return ctx.sync().then(function () {
         return appendLog(ctx, state.rules.log, F.undoLogRows(x.plan, x.check.ready, stamp).concat(F.undoRowLogRows(x.plan, rowsReady, stamp)).concat(F.undoRunLogRows(x.plan, runsReady, stamp)));
+      }).then(function () {
+        if (!rowsReady.length) return null;
+        setStatus("Painting sheet CDF…");
+        return repaintIn(ctx, {}).catch(function () { return null; });   // rows moved back: the look follows them
       }).then(function () {
         setStatus("Rebuilding CDF SUMMARY and EMAIL DRAFT…");
         return rebuildReports(ctx, new Date()).catch(function (e) { return { failed: errText(e) }; });
@@ -3503,6 +3772,8 @@
     var wb = $("writeRowBtn"); if (wb) wb.disabled = state.busy;
     var mb = $("morningBtn"); if (mb) mb.disabled = state.busy || !ok || !state.inExcel || !state.rules.cdfAlgorithm;
     $("undoBtn").disabled = state.busy || !state.inExcel;
+    $("repaintBtn").disabled = state.busy || !state.inExcel;
+    var la = $("lookAdd"); if (la) la.disabled = state.busy || !state.inExcel;
     $("privSave").disabled = state.busy || !state.inExcel;
     updateActionBar();
   }

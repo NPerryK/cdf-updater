@@ -739,6 +739,69 @@
     version: "prompt_version", promptversion: "prompt_version"
   };
 
+  // Rows given as lists of values, without field names — from any AI (Claude, ChatGPT…) or copied from Excel.
+  // The order is told by where the CDF number stands and by how many values a row has:
+  var PASTE_ORDERS = [
+    // CDF first, then the two files: what ChatGPT gives when asked for "rows"
+    { cdf: 0, n: 13, keys: ["cdf_number", "main_file", "att_file", "form_date", "priority", "description", "oem_category", "drawing_number", "installation", "code", "drawing_rev", "author", "technical_adviser"] },
+    // the add-in's own field order
+    { cdf: 2, n: 13, keys: PASTE_KEYS.slice() },
+    // without the files
+    { cdf: 0, n: 11, keys: ["cdf_number", "form_date", "priority", "description", "oem_category", "drawing_number", "installation", "code", "drawing_rev", "author", "technical_adviser"] },
+    // the CDF sheet's own columns A–O (CDF, link file, link, revision, notes, date, priority, …)
+    { cdf: 0, n: 15, sheet: true, keys: ["cdf_number", "att_file", "main_file", "cdf_rev", "", "form_date", "priority", "description", "oem_category", "drawing_number", "installation", "code", "drawing_rev", "author", "technical_adviser"] }
+  ];
+  // header names (the add-in's, older ones, or the CDF sheet's own headers) → the add-in's fields
+  var HEADER_ALIASES = {
+    cdf_num_link_to_dev: "cdf_number", cdf_number: "cdf_number", link_to_gcc: "main_file", link_to_gcc_file: "att_file",
+    cdf_revision: "cdf_rev", received_date: "form_date", problem_description: "description", tags: "oem_category",
+    dwg: "drawing_number", "dwg._name": "installation", dwg_name: "installation", cdf_dwg_rev: "drawing_rev",
+    technical_adviser: "technical_adviser"
+  };
+  var CDF_RX = /^A\d{3}-\d+-\d+/i;
+  function fieldOf(name) {
+    var k = String(name == null ? "" : name).trim().toLowerCase().replace(/[\s\-()\/]+/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "");
+    k = HEADER_ALIASES[k] || PASTE_ALIASES[k] || k;
+    return PASTE_KEYS.indexOf(k) >= 0 || k === "cdf_rev" ? k : null;
+  }
+  // lists of values → objects with field names (or null when the order can't be told)
+  function rowsToObjects(rows) {
+    rows = rows.filter(function (r) { return Array.isArray(r) && r.some(function (v) { return v != null && String(v).trim() !== ""; }); });
+    if (!rows.length) return null;
+    var head = rows[0].map(fieldOf), named = head.filter(Boolean).length;
+    if (named >= 3 && named >= rows[0].length / 2 && !rows[0].some(function (v) { return CDF_RX.test(String(v).trim()); })) {
+      return { order: "the header row", list: rows.slice(1).map(function (r) {
+        var o = {}; head.forEach(function (k, i) { if (k && o[k] == null) o[k] = r[i]; }); return o; }) };
+    }
+    var at = {};
+    rows.forEach(function (r) { r.forEach(function (v, i) { if (CDF_RX.test(String(v == null ? "" : v).trim())) at[i] = (at[i] || 0) + 1; }); });
+    var idx = Object.keys(at).sort(function (a, b) { return at[b] - at[a]; })[0];
+    if (idx == null) return null;
+    idx = +idx;
+    var n = rows.reduce(function (m, r) { return Math.max(m, r.length); }, 0);
+    // exactly that many values, and the date column holds dates: another format with the CDF first isn't misread
+    var DATE_RX = /^(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}|\d{4}-\d{2}-\d{2}|\d{1,2} [A-Za-z]{3} \d{4})?$/;
+    var ord = PASTE_ORDERS.filter(function (o) {
+      if (o.cdf !== idx || o.n !== n) return false;
+      var d = o.keys.indexOf("form_date");
+      return rows.every(function (r) { return DATE_RX.test(String(r[d] == null ? "" : r[d]).trim()); });
+    })[0];
+    if (!ord) return null;
+    return { order: ord.keys.filter(Boolean).join(", "), list: rows.map(function (r) {
+      var o = {};
+      ord.keys.forEach(function (k, i) { if (k) o[k] = r[i] == null ? "" : r[i]; });
+      // the sheet's columns carry the revision apart: put it back on the number (A330-1-973 + A → A330-1-973.A)
+      if (o.cdf_rev != null) { var rv = String(o.cdf_rev).trim(); if (rv && !/\.[^.]*$/.test(String(o.cdf_number).trim())) o.cdf_number = String(o.cdf_number).trim() + "." + rv; delete o.cdf_rev; }
+      return o;
+    }) };
+  }
+  function splitTable(s) {
+    var lines = s.split(/\r?\n/).filter(function (l) { return l.trim(); });
+    var sep = lines.some(function (l) { return l.split("\t").length >= 4; }) ? "\t" : null;
+    if (!sep) return null;
+    return lines.map(function (l) { return l.split(sep).map(function (v) { return v.trim().replace(/^"(.*)"$/, "$1"); }); });
+  }
+
   // A table row (tab-separated) instead of JSON: Claude answered in another format,
   // usually because it did not get the add-in's instructions.
   function looksLikeTable(s) {
@@ -746,33 +809,65 @@
     return s.split(/\r?\n/).some(function (line) { return line.split("\t").length >= 4; });
   }
 
-  // returns { items: [{main_file, att_file, cdf_number, ..., flags:[]}], error, kind }
-  //   kind (when there is an error): empty | table | nojson | cut | invalid | norows
-  function parseAiPaste(text) {
-    var s = String(text || "").replace(/^\uFEFF/, "").trim();
-    if (!s) return { items: [], error: "Nothing was pasted", kind: "empty" };
-    var fence = /```(?:json|JSON)?\s*([\s\S]*?)```/.exec(s);
-    if (fence) s = fence[1].trim();
-    if (looksLikeTable(s)) return { items: [], kind: "table",
-      error: "This reply is a table row (columns separated by tabs), not the JSON block the add-in reads. Claude answered in another format - it did not get the add-in's instructions." };
+  // The first JSON value in a reply, read leniently: smart quotes, a comma before ] or }, raw line breaks,
+  // // comment lines, Python-style 'quotes' / None / True. → { data } or { kind: nojson | cut | invalid, error }
+  function looseJson(text) {
+    var s = String(text || "");
     var a = s.indexOf("["), o = s.indexOf("{");
     var start = a < 0 ? o : o < 0 ? a : Math.min(a, o);
-    if (start < 0) return { items: [], kind: "nojson", error: "No JSON found. Copy the code block from Claude's reply (the Copy button in the corner of the block)." };
+    if (start < 0) return { kind: "nojson", error: "No JSON found. Copy the code block from the AI's reply (the Copy button in the corner of the block)." };
     var close = s.charAt(start) === "[" ? "]" : "}";
     var end = s.lastIndexOf(close);
-    if (end < start) return { items: [], kind: "cut", error: "The JSON is cut off — make sure you copied the whole block" };
+    if (end < start) return { kind: "cut", error: "The JSON is cut off — make sure you copied the whole block" };
     var body = s.slice(start, end + 1), data = null;
     var attempts = [
       body,
       body.replace(/[“”„‟″]/g, '"').replace(/[‘’]/g, "'"),
     ];
-    attempts.push(attempts[1].replace(/,\s*([\]}])/g, "$1"));
-    attempts.push(attempts[2].replace(/[\t\r\n]+/g, " "));   // raw tabs / line breaks inside strings
+    attempts.push(attempts[1].replace(/,\s*([\]}])/g, "$1"));                       // a comma before ] or }
+    attempts.push(attempts[2].replace(/[\t\r\n]+/g, " "));                           // raw tabs / line breaks inside strings
+    attempts.push(attempts[2].replace(/^\s*\/\/.*$/gm, "").replace(/[\t\r\n]+/g, " "));   // // comment lines
+    if (attempts[1].indexOf('"') < 0)                                                 // Python-style: 'single quotes', None, True
+      attempts.push(attempts[2].replace(/'((?:[^'\\]|\\.)*)'/g, function (m, x) { return JSON.stringify(x.replace(/\\'/g, "'")); })
+        .replace(/\bNone\b/g, "null").replace(/\bTrue\b/g, "true").replace(/\bFalse\b/g, "false").replace(/[\t\r\n]+/g, " "));
     for (var i = 0; i < attempts.length && data === null; i++) {
       try { data = JSON.parse(attempts[i]); } catch (e) { data = null; }
     }
-    if (data === null) return { items: [], kind: "invalid", error: "The JSON is not valid - Claude's reply is not in the format the add-in reads." };
-    var list = Array.isArray(data) ? data : (data && Array.isArray(data.rows) ? data.rows : [data]);
+    if (data === null) return { kind: "invalid", error: "The JSON is not valid — the reply is not in a format the add-in reads." };
+    return { data: data };
+  }
+
+  // returns { items: [{main_file, att_file, cdf_number, ..., flags:[]}], error, kind }
+  //   kind (when there is an error): empty | table | nojson | cut | invalid | norows
+  function parseAiPaste(text) {
+    var s = String(text || "").replace(/^\uFEFF/, "").trim();
+    if (!s) return { items: [], error: "Nothing was pasted", kind: "empty" };
+    s = s.replace(/\u00a0/g, " ");                               // non-breaking spaces from web pages
+    var fence = /```[a-zA-Z]*[ \t]*\r?\n?([\s\S]*?)```/.exec(s);       // ```json, ```javascript, ``` … — any code block
+    if (fence) s = fence[1].trim();
+    var order = null, list = null;
+    // rows copied from Excel (tab-separated): read them when the CDF number tells the column order
+    if (looksLikeTable(s)) {
+      var tab = splitTable(s), conv = tab && rowsToObjects(tab);
+      if (!conv) return { items: [], kind: "table",
+        error: "This is a table (columns separated by tabs) whose column order the add-in can't tell. Paste the JSON block from the AI's reply, or a table with a header row." };
+      order = conv.order; list = conv.list;
+    }
+    if (!list) {
+      var lj = looseJson(s);
+      if (lj.error) return { items: [], kind: lj.kind, error: lj.error };
+      var data = lj.data;
+      list = Array.isArray(data) ? data : (data && Array.isArray(data.rows) ? data.rows : [data]);
+      // a list of lists (values without field names): the order is told by where the CDF number stands
+      if (list.length && list.every(function (r) { return Array.isArray(r); })) {
+        var conv2 = rowsToObjects(list);
+        if (!conv2) return { items: [], kind: "invalid", error: "These rows have values without field names, in an order the add-in can't tell (it looks for the CDF number, e.g. A330-1-978, and the number of values in a row)." };
+        order = conv2.order; list = conv2.list;
+      } else if (Array.isArray(data) && data.length === 1 && Array.isArray(data[0]) && !data[0].some(Array.isArray)) {
+        var conv3 = rowsToObjects([data[0]]);
+        if (conv3) { order = conv3.order; list = conv3.list; }
+      }
+    }
     var items = [];
     list.forEach(function (raw) {
       if (!raw || typeof raw !== "object") return;
@@ -789,6 +884,7 @@
         } else if (!/^dwg$/.test(key)) unused.push(k);
       });
       if (unused.length) it.flags.push("Not used (not in the add-in's format): " + unused.join(", "));
+      if (order) it.flags.push("Read from rows without field names, in this order: " + order + " — check the fields.");
       if (it.prompt_version == null) it.prompt_version = "";
       PASTE_KEYS.forEach(function (k) { if (it[k] == null) it[k] = ""; });
       if (it.cdf_number || it.main_file || it.description) items.push(it);
@@ -989,7 +1085,7 @@
     parseCdfFileName: parseCdfFileName,
     importFileMatches: importFileMatches,
     matchImportSlot: matchImportSlot,
-    parseAiPaste: parseAiPaste,
+    parseAiPaste: parseAiPaste, looseJson: looseJson,
     readSheetTables: readSheetTables,
     buildDailyEmail: buildDailyEmail,
     assignNewRowTargets: assignNewRowTargets,
