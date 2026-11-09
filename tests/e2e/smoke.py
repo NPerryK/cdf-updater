@@ -51,8 +51,8 @@ PEOPLE = 'PERSON_GROUP "IAI - Design Engineering" "Dana Levi; Ron Avi"\nPERSON_G
 SIGNERS = 'FINAL_APPROVAL_RELEASE "Tom Bar"\nPENDING_TABLE "DANA PENDING TABLE" "Dana Ben-Ari"\n'
 SHEETS = [{"name": "CDF", "values": CDF}, {"name": "GCC", "values": GCC}, {"name": "Mantra", "values": MANTRA}, {"name": "MANTRAREV", "values": [HEAD["mantraRev"]]}]
 
-def boot(browser, priv=PEOPLE + SIGNERS):
-    page = browser.new_page(viewport={"width": 380, "height": 900})
+def boot(browser, priv=PEOPLE + SIGNERS, ctx=None):
+    page = (ctx or browser).new_page(**({} if ctx else {"viewport": {"width": 380, "height": 900}}))
     page.on("pageerror", lambda e: (print("   [pageerror]", e), errors.append(str(e))))
     def handle(route):
         url = route.request.url
@@ -87,10 +87,24 @@ with sync_playwright() as p:
     er = page.inner_text("#rulesErrors")
     check("Workbook settings: The workbook settings need FINAL_APPROVAL_RELEASE (rule 10) and PENDING_TABLE (100.5)" in er, "the message: " + er[:110])
     check(page.is_disabled("#previewBtn") and page.is_disabled("#morningBtn"), "Check changes and the morning update wait for them")
-    check("One step before the update" in page.inner_text("#banner"), "the main screen says why: " + page.inner_text("#banner")[:80])
+    check("has no people settings yet" in page.inner_text("#banner"), "the main screen says why: " + page.inner_text("#banner")[:80])
+    check(page.inner_text("#rulesPill") == "NEEDS SETUP", "the light says NEEDS SETUP (fits the lamp)")
+    page.click("#tab-today"); page.click("#banner")
+    check(page.is_visible("#privText") and page.evaluate("document.activeElement.id") == "privText", "a click on the banner opens SETUP at the settings box")
     page.fill("#privText", PEOPLE + SIGNERS); page.click("#privSave"); page.wait_for_selector("#rulesPill.ok", timeout=10000)
     check(page.is_enabled("#previewBtn"), "pasted and saved → ready")
     page.close()
+
+    print("\nA workbook without the settings, on a computer that has them: added by themselves")
+    ctx = browser.new_context(viewport={"width": 380, "height": 900})
+    page = boot(browser, ctx=ctx)                      # this workbook has them: the computer keeps a copy
+    page.close()
+    page = boot(browser, priv="", ctx=ctx)            # another workbook, none
+    page.wait_for_selector("#rulesPill.ok", timeout=10000)
+    check("added from this computer" in page.inner_text("#banner"), "says so: " + page.inner_text("#banner")[:90])
+    check(page.evaluate("window.__xmlParts.some(p => decodeURIComponent(p.xml).indexOf('Tom Bar') > 0)"), "and they're written into this workbook too")
+    check(page.is_enabled("#previewBtn"), "ready without pasting")
+    ctx.close()
 
     page = boot(browser)
 

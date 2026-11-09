@@ -209,14 +209,16 @@
     if (!state.inExcel) state.rules.errors = state.rules.errors.filter(function (e) { return !e.setting; });
     else {
       var se = state.rules.errors.filter(function (e) { return e.setting; })[0];
-      if (se) showBanner("One step before the update: " + se.message, true);   // said where the buttons are, not only in SETUP
+      // said where the buttons are, not only in SETUP; a click takes you there
+      if (se) showBanner("This workbook has no people settings yet (who releases at Final Approval, the pending tables, the people groups). " +
+        "Click here, paste them in Workbook settings, Save to workbook, then Ctrl+S. This computer remembers them for every workbook after that.", true, true);
     }
     state.loadedAt = new Date();
     state.lastPreview = null;
     $("results").innerHTML = "";
     var errs = state.rules.errors.length, onlySettings = errs && state.rules.errors.every(function (e) { return e.setting; });
-    setPill(onlySettings ? "SETTINGS MISSING" : errs ? "RULES " + errs + " ERR" : "RULES OK", errs ? "bad" : "ok");
-    if (errs) $("rulesPill").title = onlySettings ? "Three people lines are missing from the workbook settings — click to open SETUP" : "Click to see the errors in SETUP";
+    setPill(onlySettings ? "NEEDS SETUP" : errs ? "RULES " + errs + " ERR" : "RULES OK", errs ? "bad" : "ok");
+    if (errs) $("rulesPill").title = onlySettings ? "The people settings are missing from this workbook — click to open SETUP" : "Click to see the errors in SETUP";
     if (!errs && state.rules.privateLines) $("rulesPill").title = "rules.txt + " + state.rules.privateLines + " lines of workbook settings, no errors";
     renderLamps();
     renderRules(); renderSlots(); renderAlgos(); renderExtras(); refreshButtons();
@@ -1643,7 +1645,12 @@
     if (car.length) html += '<div class="hint rep-hint">The four release tables (CDFS / DOCUMENTS RELEASED) are kept as they are' + (car[0].title.match(/\(AS OF [^)]*\)/) ? " " + esc(car[0].title.match(/\(AS OF [^)]*\)/)[0]) : "") + " — they are computed from BACKUPDATA when the workbook has sheet Mantra.</div>";
     else if (res.history && res.history.ran) html += '<div class="hint rep-hint">The four release tables are computed from BACKUPDATA — the events of committed runs' + (res.history.out.commits ? ", this run included" : " (this run fails, so its events don't count)") + ".</div>";
     if (rep.model.missing.length) html += '<div class="hint rep-hint">Not in CDF SUMMARY now, so not written: ' + esc(rep.model.missing.join(", ")) + ".</div>";
-    if (rep.model.unmapped.length) html += '<div class="note warn rep-in">Not in the people list (PERSON_GROUP), shown as UNMAPPED: ' + esc(rep.model.unmapped.join(", ")) + "</div>";
+    if (rep.model.unmapped.length) {
+      var noList = !(state.rules && state.rules.cdfConfig.personGroups && state.rules.cdfConfig.personGroups.length);
+      html += '<div class="note warn rep-in">' + (noList
+        ? "This workbook has no people list (the PERSON_GROUP lines in SETUP › Workbook settings), so each group is taken from column V — and these people have none there, so they show as UNMAPPED: "
+        : "Not in any PERSON_GROUP of the workbook settings, so shown as UNMAPPED — add them to a group in SETUP › Workbook settings: ") + esc(rep.model.unmapped.join(", ")) + "</div>";
+    }
     if (applied && rep.readBack) html += rep.readBack.length
       ? '<div class="note bad rep-in"><b>CDF SUMMARY shows ' + rep.readBack.length + " number" + (rep.readBack.length > 1 ? "s" : "") + " other than computed</b> — is calculation set to Manual? " + esc(rep.readBack.slice(0, 8).map(function (b) { return b.cell + " " + b.got + " (computed " + b.want + ")"; }).join(", ")) + "</div>"
       : '<div class="hint rep-hint ok">Read back after writing: every number CDF SUMMARY shows is the number computed here.</div>';
@@ -2738,8 +2745,8 @@
       '<div class="mail-box"><div class="mail-head"><b>To:</b> ' + esc(to.join("; ") || "—") +
       (cc.length ? "<br><b>Cc:</b> " + esc(cc.join("; ")) : "") + "<br><b>Subject:</b> " + esc(m.subject) + "</div>" +
       '<div class="mail-body">' + m.html + "</div></div>" +
-      (m.notes && m.notes.length ? '<div class="note warn" style="margin-top:8px"><ul>' + m.notes.map(function (n) { return "<li>" + esc(n) + "</li>"; }).join("") + "</ul>Notes for you — they are not part of the email.</div>" : "") +
-      (tooLong ? '<div class="note warn" style="margin-top:8px">The email is too long to open directly — the table will be copied; just paste it into the draft (Ctrl+V).</div>' : "") +
+      (m.notes && m.notes.length ? '<div class="hint mail-notes"><b>How this email was built</b> (not part of the email):<ul>' + m.notes.map(function (n) { return "<li>" + esc(n) + "</li>"; }).join("") + "</ul></div>" : "") +
+      (tooLong ? '<div class="note warn" style="margin-top:8px">Outlook takes only short emails through a link, and this one has tables. ' + (m.eml ? "<b>Easiest: Save as .eml draft</b> and open the file — the whole email opens in Outlook, ready to send. Or: " : "") + "Open draft in Outlook opens an empty draft and copies the tables — paste them in the body (Ctrl+V).</div>" : "") +
       '<div class="mail-actions">' +
       '<a id="openMail" class="btn primary" href="' + esc(url) + '">Open draft in Outlook</a>' +
       '<div class="row"><button id="copyMail" class="btn" type="button" style="flex:1"><svg class="ico"><use href="#i-copy"/></svg>Copy as table</button>' +
@@ -2881,6 +2888,17 @@
     return readStore(NS_SETTINGS).then(function (s) {
       state.privText = (s && s.privateRules) || "";
       state.signature = (s && s.signature) || [];
+      var mine = privateOnComputer();
+      if (state.privText.trim()) rememberPrivate(state.privText);
+      else if (mine.trim() && storesSupported() && !F.privateLines(mine).length) {
+        // this workbook has none: the ones saved on this computer go in (the file keeps them once it's saved)
+        state.privText = mine;
+        return writeStore(NS_SETTINGS, { privateRules: mine, signature: state.signature, savedAt: new Date().toISOString() }).then(function () {
+          showBanner("The people settings weren't in this workbook — added from this computer (" + mine.split(/\r?\n/).filter(function (l) { return l.trim() && !/^\s*#/.test(l); }).length + " lines). Save the workbook (Ctrl+S) to keep them in the file.", false);
+        }, function () { /* used for this session only */ }).then(function () { return s; });
+      }
+      return s;
+    }).then(function () {
       $("privText").value = state.privText;
       return readStore(NS_HISTORY);
     }).then(function (h) {
@@ -3524,12 +3542,17 @@
     var errs = E.parseRules(text).errors;
     if (errs.length) { msg.className = "msg bad"; msg.textContent = "Line " + errs[0].line + ": " + errs[0].message; return; }
     writeStore(NS_SETTINGS, { privateRules: text, signature: state.signature || [], savedAt: new Date().toISOString() }).then(function () {
-      state.privText = text;
+      state.privText = text; rememberPrivate(text);
       applyRulesText(state.rulesText);
       msg.className = "msg ok";
       msg.textContent = "Saved in this workbook ✓ (" + state.rules.privateLines + " lines). Save the workbook (Ctrl+S) to keep them, then remove these lines from rules.txt on GitHub.";
     }).catch(function (e) { msg.className = "msg bad"; msg.textContent = errText(e); });
   }
+  // The people settings live in the workbook; a copy stays on this computer (Office's storage for the add-in), so a
+  // workbook that doesn't have them yet — a new copy, another file — gets them without pasting again.
+  var PRIV_LOCAL_KEY = "cdfUpdater.privateRules.v1";
+  function rememberPrivate(text) { try { if (String(text || "").trim()) localStorage.setItem(PRIV_LOCAL_KEY, text); } catch (e) { /* the workbook still has them */ } }
+  function privateOnComputer() { try { return localStorage.getItem(PRIV_LOCAL_KEY) || ""; } catch (e) { return ""; } }
   function movePrivate() {
     var x = F.extractPrivate(state.rulesText), msg = $("privMsg");
     if (!x.moved) { msg.className = "msg"; msg.textContent = "rules.txt has no settings lines left to move."; return; }
@@ -3784,7 +3807,11 @@
   function setPill(t, cls) {
     setLamp("rulesPill", t, cls, cls === "ok" ? "rules.txt loaded with no errors" : cls === "bad" ? "The rules file has errors - see Rules file at the bottom" : "Loading rules.txt");
   }
-  function showBanner(t, bad) { var b = $("banner"); b.textContent = t; b.className = "banner" + (bad ? " bad" : ""); }
+  function showBanner(t, bad, toSetup) {
+    var b = $("banner"); b.textContent = t; b.className = "banner" + (bad ? " bad" : "") + (toSetup ? " go" : "");
+    b.onclick = toSetup ? function () { showPage("setup"); var x = $("privText"); x.scrollIntoView({ block: "center" }); x.focus(); } : null;
+    if (toSetup) { b.setAttribute("role", "button"); b.tabIndex = 0; } else { b.removeAttribute("role"); b.removeAttribute("tabindex"); }
+  }
   function showError(e) { $("results").innerHTML = '<div class="note bad">' + esc(errText(e)) + "</div>"; }
 
   function errText(e) {

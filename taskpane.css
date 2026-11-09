@@ -851,3 +851,7 @@ td.rule, span.rule { color: var(--muted); font-size: 11px; white-space: nowrap; 
 .look-report ul { margin: 4px 0 0 18px; padding: 0; }
 .look-open { margin-top: 6px; gap: 6px; }
 .look-open .btn { flex: 1; justify-content: center; }
+.banner.go { cursor: pointer; }
+.banner.go:hover, .banner.go:focus-visible { filter: brightness(1.08); outline: 2px solid currentColor; outline-offset: 1px; }
+.mail-notes { margin-top: 8px; }
+.mail-notes ul { margin: 4px 0 0 18px; padding: 0; }
