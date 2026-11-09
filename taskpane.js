@@ -200,6 +200,10 @@
     state.rules = F.mergeRules(state.rulesPublic, state.privText || "");
     // outside Excel there's no workbook to hold the people settings: checking the hosting shouldn't show their absence as an error
     if (!state.inExcel) state.rules.errors = state.rules.errors.filter(function (e) { return !e.setting; });
+    else {
+      var se = state.rules.errors.filter(function (e) { return e.setting; })[0];
+      if (se) showBanner("One step before the update: " + se.message, true);   // said where the buttons are, not only in SETUP
+    }
     state.loadedAt = new Date();
     state.lastPreview = null;
     $("results").innerHTML = "";
@@ -3486,7 +3490,9 @@
   // ---------------- small helpers ----------------
   function refreshButtons() {
     var ok = !!state.rules && !state.rules.errors.length;
-    $("importBtn").disabled = state.busy || !ok || !state.inExcel || !state.canImport || !chosenSlots().length;
+    // missing people settings stop the CDF algorithm only: importing the exports doesn't need them
+    var okImport = !!state.rules && !state.rules.errors.some(function (e) { return !e.setting; });
+    $("importBtn").disabled = state.busy || !okImport || !state.inExcel || !state.canImport || !chosenSlots().length;
     var n = chosenSlots().length;
     $("importBtn").textContent = n > 1 ? "Replace " + n + " sheets" : n === 1 ? "Replace sheet" : "Replace sheets";
     $("previewBtn").disabled = state.busy || !ok || !state.inExcel;
