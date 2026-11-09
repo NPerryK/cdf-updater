@@ -61,11 +61,11 @@
 
   // ---------------------------------------------------------------- people
   // the name as written in the people list (PERSON_GROUP); otherwise as in X
-  function makeNames(cfg, mantra) {
+  function makeNames(cfg, mantra, cdf) {
     var canon = {}, alias = {};
     ((cfg && cfg.personGroups) || []).forEach(function (g) { (g.people || []).forEach(function (p) { canon[personKey(p)] = trim(p); }); });
     ((cfg && cfg.personAliases) || []).forEach(function (a) { alias[personKey(a.from)] = personKey(a.to); });
-    var people = mantra && mantra.makePeople ? mantra.makePeople(cfg) : null;
+    var people = mantra && mantra.makePeople ? mantra.makePeople(cfg, cdf) : null;
     return {
       people: people,
       canon: function (x) {
@@ -79,9 +79,8 @@
       },
       group: function (x, v) {
         var g = people && mantra ? mantra.groupOf(x, people) : null;
-        if (g && g !== "-") return g;
-        var vv = trim(v);                                       // no people list: the group stage 2 wrote in V
-        return vv && vv !== "-" && vv.indexOf(",") < 0 ? vv : "UNMAPPED";
+        if (g) return mantra.groupLabel(g) || "-";
+        return mantra ? mantra.groupLabel(v) || "-" : "-";
       }
     };
   }
@@ -141,7 +140,10 @@
   function personGroups(rel, names) {
     var m = {};
     rel.forEach(function (x) {
-      x.persons.forEach(function (p) { var c = names.canon(p); addOnce(m, names.group(c, x.V), c + "|" + x.key); });
+      x.persons.forEach(function (p) {
+        var c = names.canon(p), group = names.group(c, x.V);
+        if (group !== "-") addOnce(m, group, c + "|" + x.key);
+      });
     });
     var rows = GROUPS.map(function (g) { return [g, (m[g] || []).length]; });
     Object.keys(m).sort(txtCmp).forEach(function (g) { if (GROUPS.indexOf(g) < 0) rows.push([g, m[g].length]); });
@@ -231,7 +233,7 @@
    */
   function build(input) {
     var cdf = input.cdf || [], s1 = input.summary, cfg = input.cfg || {}, algo = input.algo;
-    var names = makeNames(cfg, input.mantra);
+    var names = makeNames(cfg, input.mantra, cdf);
     var rel = relations(cdf, algo);
     var t1 = {}; (s1 ? s1.tables : []).forEach(function (t) { t1[t.name] = t; });
     var pendingNames = (s1 && s1.pendingPeople || []).map(function (p) { return p.table; });
@@ -267,7 +269,7 @@
       tables: tables, relations: rel, persons: persons,
       missing: RELEASE.filter(function (d) { return !rt[d.id]; }).map(function (d) { return d.name; }),
       duplicates: (cfg.duplicates && cfg.duplicates.length ? cfg.duplicates : [DUPLICATE_RAW]),
-      unmapped: persons.filter(function (p) { return p.group === "UNMAPPED"; }).map(function (p) { return p.person; }).filter(function (x, i, a) { return a.indexOf(x) === i; })
+      missingGroups: persons.filter(function (p) { return p.group === "-"; }).map(function (p) { return p.person; }).filter(function (x, i, a) { return a.indexOf(x) === i; })
     };
   }
 

@@ -145,9 +145,9 @@
     set: function (p) { var a = this._sh.cfs, i = a.indexOf(this._rule); a.splice(i, 1); a.splice(Math.min(p, a.length), 0, this._rule); }
   });
   CF.prototype.delete = function () { var a = this._sh.cfs, i = a.indexOf(this._rule); if (i >= 0) a.splice(i, 1); wb.calls.push("cfDelete " + this._sh.name); };
-  CF.prototype.getRangesOrNullObject = function () {
+  CF.prototype.getRanges = function () {
     var sh = this._sh, r = this._rule;
-    return { isNullObject: !r.areas.length, areaCount: r.areas.length, load: function () { return this; }, address: r.areas.map(function (b) { return sh.name + "!" + boxText(b); }).join(", ") };
+    return { areaCount: r.areas.length, load: function () { return this; }, address: r.areas.map(function (b) { return sh.name + "!" + boxText(b); }).join(", ") };
   };
   function CFCollection(sh, boxes) { this._sh = sh; this._boxes = boxes; }
   CFCollection.prototype.load = function () { return this; };

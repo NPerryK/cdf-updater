@@ -114,7 +114,7 @@
   // ---------- status rows (Excel → Outlook) ----------
   // since: the day the CDF reached its station (yyyy-mm-dd); exact: 1 when known — when 0, "since" is the day it was
   // received (the most it can be) and "seen" the day CDF Updater first saw it there (the least it can be)
-  var COLS = ["key", "status", "station", "signature", "supplier", "dwg", "dwgName", "received", "docs", "ready", "since", "exact", "seen"];
+  var COLS = ["key", "status", "station", "signature", "supplier", "dwg", "dwgName", "received", "docs", "ready", "since", "exact", "seen", "notes"];
   function rowObj(r) { var o = {}; COLS.forEach(function (c, i) { o[c] = r[i]; }); return o; }
   // every status row a set of references points to
   function statusFor(refList, data) {
@@ -122,7 +122,9 @@
     (refList || []).forEach(function (ref) {
       var hit = false;
       (data && data.rows || []).forEach(function (r) {
-        if (matches(ref, r[0]) && !seen[r[0]]) { seen[r[0]] = true; hit = true; out.push(rowObj(r)); }
+        if (!matches(ref, r[0])) return;
+        hit = true;
+        if (!seen[r[0]]) { seen[r[0]] = true; out.push(rowObj(r)); }
       });
       if (!hit && !seen[ref.label]) { seen[ref.label] = true; out.push({ key: ref.label, missing: true }); }
     });

@@ -183,7 +183,12 @@ svg.ico { width: 15px; height: 15px; flex: none; }
 .trend .tn { font-size: 10px; color: #8ea3b6; }
 
 .ecam-foot { margin-top: 8px; padding-top: 6px; border-top: 1px dashed #233a4e; display: flex; justify-content: flex-start; font-size: 10.5px; letter-spacing: .07em; }
-.ecam-foot .dim { color: #6f8396; }
+.ecam-foot .dim { color: #8195a8; }
+.ecam-progress { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; margin-top: 8px; padding-top: 6px; border-top: 1px dashed #233a4e; }
+.ecam-progress .metric .v { font-size: 17px; }
+.ecam-progress .metric .k { font-size: 9px; line-height: 1.2; white-space: normal; }
+.ecam-progress .metric:disabled { opacity: .55; cursor: default; }
+.cdf-notes { white-space: pre-wrap; overflow-wrap: anywhere; }
 .stuck-lamp { font: inherit; letter-spacing: inherit; color: var(--e-amber); background: rgba(255,180,32,.08); border: 1px solid rgba(255,180,32,.45); border-radius: 3px; padding: 2px 8px; cursor: pointer; text-shadow: 0 0 8px rgba(255,180,32,.35); }
 .stuck-lamp .sl-v { font-weight: 600; font-variant-numeric: tabular-nums; }
 .stuck-lamp:hover { background: rgba(255,180,32,.16); }
@@ -823,7 +828,7 @@ td.rule, span.rule { color: var(--muted); font-size: 11px; white-space: nowrap; 
 /* the trim of BACKUPDATA: rolling quietly, the first (bulk) one asks */
 .ledger span.off b { color: var(--faint); }
 .trim-roll { color: var(--muted); }
-.trim-box { margin: 0 10px 10px; padding: 10px 12px; border: 1px dashed color-mix(in srgb, var(--warning) 55%, var(--line)); border-radius: 8px; background: color-mix(in srgb, var(--warning) 6%, var(--page)); }
+.trim-box { margin: 0 10px 10px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 8px; }
 .trim-t { font-family: var(--display); font-weight: 600; font-size: 12.5px; letter-spacing: .04em; margin-bottom: 4px; }
 .trim-box p { margin: 0 0 8px; font-size: 12px; line-height: 1.45; }
 .trim-box .btn { width: 100%; }

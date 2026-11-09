@@ -186,19 +186,19 @@ test("uvwx", "released → dashes", () => assert.deepStrictEqual(M.uvwx({ status
 test("uvwx", "rejected: group, function, person", () => assert.deepStrictEqual(M.uvwx({ status: "PRE-RELEASED REJECTED", rejects: 1, rejBy: "Ron Avi", rejFn: "Stress" }, PEOPLE), { U: "2 - IN WORK", V: "IAI - Stress Department", W: "Rejected | Stress", X: "Ron Avi" }));
 test("uvwx", "rejected without who → W Rejected", () => { const x = M.uvwx({ status: "IN-WORK REJECTED", rejects: 2, rejBy: "", rejFn: "" }, PEOPLE); assert.deepStrictEqual([x.W, x.X, x.note], ["Rejected", "-", "REJECTED_BY_MISSING_IN_SOURCE"]); });
 test("uvwx", "pending: the same person twice is one", () => assert.deepStrictEqual(M.uvwx({ status: "IN-WORK WF", rejects: 0, pendEmp: "Dana Levi, Dana Levi", pendFn: "Check Design (SIE)" }, PEOPLE), { U: "2 - IN WORK", V: "IAI - Design Engineering", W: "Check Design (SIE)", X: "Dana Levi" }));
-test("uvwx", "no people list → V null (left as it is)", () => assert.strictEqual(M.uvwx({ status: "IN-WORK WF", rejects: 0, pendEmp: "Dana Levi", pendFn: "F" }, M.makePeople({})).V, null));
+test("uvwx", "no confirmed group → V dash", () => assert.strictEqual(M.uvwx({ status: "IN-WORK WF", rejects: 0, pendEmp: "Dana Levi", pendFn: "F" }, M.makePeople({})).V, "-"));
 test("uvwx", "unmapped status → error", () => assert.ok(M.uvwx({ status: "ARCHIVED", rejects: 0 }, PEOPLE).error));
 
-test("makePeople", "empty config", () => assert.strictEqual(M.makePeople({}).empty, true));
+test("makePeople", "empty config", () => assert.deepStrictEqual(Object.keys(M.makePeople({}).map), []));
 test("makePeople", "names are keys", () => assert.strictEqual(PEOPLE.map["DANA LEVI"], "IAI - Design Engineering"));
 test("makePeople", "one name in two groups → AMBIGUOUS", () => assert.strictEqual(M.makePeople({ personGroups: [{ group: "A", people: ["X Y"] }, { group: "B", people: ["X Y"] }] }).map["X Y"], "AMBIGUOUS"));
 test("makePeople", "aliases", () => assert.strictEqual(PEOPLE.alias["LEVI DANA"], "DANA LEVI"));
-test("makePeople", "null config", () => assert.strictEqual(M.makePeople(null).empty, true));
+test("makePeople", "null config", () => assert.deepStrictEqual(Object.keys(M.makePeople(null).map), []));
 
 test("groupOf", "known", () => assert.strictEqual(M.groupOf("dana levi", PEOPLE), "IAI - Design Engineering"));
 test("groupOf", "alias", () => assert.strictEqual(M.groupOf("Levi Dana", PEOPLE), "IAI - Design Engineering"));
 test("groupOf", "two words the other way round", () => assert.strictEqual(M.groupOf("Avi Ron", PEOPLE), "IAI - Stress Department"));
-test("groupOf", "unknown → UNMAPPED", () => assert.strictEqual(M.groupOf("Nobody Here", PEOPLE), "UNMAPPED"));
+test("groupOf", "unknown → no assignment", () => assert.strictEqual(M.groupOf("Nobody Here", PEOPLE), null));
 test("groupOf", "- and empty → -", () => { assert.strictEqual(M.groupOf("-", PEOPLE), "-"); assert.strictEqual(M.groupOf("", PEOPLE), "-"); });
 test("groupOf", "no list → null", () => assert.strictEqual(M.groupOf("Dana Levi", M.makePeople({})), null));
 
@@ -242,7 +242,20 @@ test("run", "no answer / words only", () => {
 });
 test("run", "a Mantra sheet it can't read stops the stage", () => { const o = M.run({ cdf: CDF, gcc: GCC, mantra: [["x"]], mantraRev: REV }, CFG, A); assert.strictEqual(o.errors[0].stage, "00.1.2"); assert.strictEqual(o.changes.length, 0); });
 test("run", "a CDF not in GCC is left as it is", () => { const o = M.run({ cdf: CDF, gcc: GCC.slice(0, 2), mantra: MANTRA, mantraRev: REV }, CFG, A); assert.strictEqual(o.blocks[1].kind, "no-gcc"); assert.ok(!o.changes.some((c) => c.key === "A330-1-002.-")); });
-test("run", "no people list → V isn't touched", () => { const o = M.run({ cdf: CDF, gcc: GCC, mantra: MANTRA, mantraRev: REV }, {}, A); assert.ok(!o.changes.some((c) => c.key === "A330-1-002.-" && c.colLetter === "V")); });
+test("run", "without a confirmed group V uses a dash", () => {
+  const o = M.run({ cdf: CDF, gcc: GCC, mantra: MANTRA, mantraRev: REV }, {}, A);
+  assert.strictEqual(o.blocks[1].want[0].V, "-");
+});
+test("run", "existing V/X assignments fill missing settings for another CDF", () => {
+  const cdf = CDF.concat([row("A330-1-100.-", "Open", { V: "IAI - Design Engineering", X: "Levi Dana" })]);
+  const o = M.run({ cdf, gcc: GCC, mantra: MANTRA, mantraRev: REV }, {}, A);
+  assert.strictEqual(o.blocks[1].want.find((w) => w.X === "Dana Levi").V, "IAI - Design Engineering");
+});
+test("groupOf", "conflicting workbook groups are not used; an explicit setting wins", () => {
+  const cdf = [[], row("A330-1-110.-", "Open", { V: "Stress", X: "Ron Avi" }), row("A330-1-111.-", "Open", { V: "Design", X: "Avi Ron" })];
+  assert.strictEqual(M.groupOf("Ron Avi", M.makePeople({}, cdf)), "AMBIGUOUS");
+  assert.strictEqual(M.groupOf("Ron Avi", M.makePeople(CFG, cdf)), "IAI - Stress Department");
+});
 
 // ---------------------------------------------------------------- 110 row operations
 const PLAN = M.layout(OUT, CDF);

@@ -5,17 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CDF Updater</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-  <script src="lib/jszip.min.js?v=1.10.1"></script>
-  <script src="engine.js?v=1.10.1"></script>
-  <script src="cdf-algo.js?v=1.10.1"></script>
-  <script src="cdf-mantra.js?v=1.10.1"></script>
-  <script src="cdf-summary.js?v=1.10.1"></script>
-  <script src="cdf-history.js?v=1.10.1"></script>
-  <script src="cdf-link.js?v=1.10.1"></script>
-  <script src="features.js?v=1.10.1"></script>
-  <script src="prompt.js?v=1.10.1"></script>
-  <script src="cdf-look.js?v=1.10.1"></script>
-  <link rel="stylesheet" href="taskpane.css?v=1.10.1">
+  <script src="lib/jszip.min.js?v=1.11.0"></script>
+  <script src="engine.js?v=1.11.0"></script>
+  <script src="cdf-algo.js?v=1.11.0"></script>
+  <script src="cdf-mantra.js?v=1.11.0"></script>
+  <script src="cdf-summary.js?v=1.11.0"></script>
+  <script src="cdf-history.js?v=1.11.0"></script>
+  <script src="cdf-link.js?v=1.11.0"></script>
+  <script src="features.js?v=1.11.0"></script>
+  <script src="prompt.js?v=1.11.0"></script>
+  <script src="cdf-look.js?v=1.11.0"></script>
+  <link rel="stylesheet" href="taskpane.css?v=1.11.0">
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -39,7 +39,7 @@
         <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg>
       </span>
       <div class="brand">
-        <h1>CDF Updater <span id="appVersion" class="ver" title="Add-in version">v1.10.1</span></h1>
+        <h1>CDF Updater <span id="appVersion" class="ver" title="Add-in version">v1.11.0</span></h1>
         <p>A330-300 P2F deviation tracker</p>
       </div>
       <button id="lookupOpen" class="deck-btn" type="button" title="Find a CDF (Ctrl+F)" aria-label="Find a CDF"><svg class="ico"><use href="#i-find"/></svg></button>
@@ -274,12 +274,12 @@
 
       <section class="card" id="linkCard">
         <div class="card-head"><h2>Link with My Notes (Outlook)</h2><span class="tag" id="linkTag"></span></div>
-        <p class="hint">My Notes shows the CDF status on every email that mentions a CDF, and your Outlook notes on a CDF show here in the CDF lookup. The data moves by copy and paste — nothing goes through GitHub.</p>
+        <p class="hint">My Notes shows CDF status and the Notes from column E. Outlook notes appear separately in the CDF lookup. Use shared local storage where Office supports it, or copy and paste between the add-ins.</p>
         <div class="link-dir"><span class="link-ico" aria-hidden="true">⇢</span><div><b>To Outlook</b><div class="hint" id="linkOutInfo">The status of every CDF in this workbook.</div></div></div>
         <button id="linkCopy" class="btn primary small" type="button">Copy CDF status for My Notes</button>
         <p class="hint">Then in Outlook: open My Notes on any email, click an empty spot in it and press Ctrl+V (or <b>Reports → CDF status</b> → paste in the box).</p>
         <textarea id="linkCopyBox" class="inp code-area hidden" rows="3" readonly aria-label="CDF status to copy"></textarea>
-        <div class="link-dir"><span class="link-ico" aria-hidden="true">⇠</span><div><b>From Outlook</b><div class="hint">When you paste the status in My Notes, it copies your notes back right away — then press Ctrl+V anywhere in this pane (or in the box). Or in My Notes: <b>Reports → CDF status → Copy notes for CDF Updater</b>.</div></div></div>
+        <div class="link-dir"><span class="link-ico" aria-hidden="true">⇠</span><div><b>From Outlook</b><div class="hint">In My Notes, choose <b>Reports → CDF status → Copy Outlook notes for Excel</b>, then paste in this pane.</div></div></div>
         <textarea id="linkPaste" class="inp code-area" rows="2" spellcheck="false" placeholder="Paste the notes here (Ctrl+V)" aria-label="Notes from My Notes"></textarea>
         <div id="linkMsg" class="msg"></div>
         <div id="linkUnknown"></div>
@@ -367,6 +367,6 @@
     <button id="abPrimary" class="btn ab-btn hidden" type="button"></button>
   </footer>
 
-  <script src="taskpane.js?v=1.10.1"></script>
+  <script src="taskpane.js?v=1.11.0"></script>
 </body>
 </html>

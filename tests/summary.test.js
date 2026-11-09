@@ -88,11 +88,11 @@ test("titleCase", "after a hyphen too", () => assert.strictEqual(S.titleCase("DA
 test("titleCase", "already mixed case stays", () => assert.strictEqual(S.titleCase("Dana van Levi"), "Dana van Levi"));
 test("titleCase", "extra spaces", () => assert.strictEqual(S.titleCase("  ANN   VENDOR "), "Ann Vendor"));
 test("titleCase", "no letters", () => assert.strictEqual(S.titleCase("-"), "-"));
-test("makeNames", "group from the list; without one, from V; else UNMAPPED", () => {
+test("makeNames", "group from the list; without one, from V; else dash", () => {
   assert.strictEqual(NAMES.group("Dana Levi", "x"), "IAI - Design Engineering");
   const none = S.makeNames({}, M);
   assert.strictEqual(none.group("Dana Levi", "ANN/SIE"), "ANN/SIE");
-  assert.strictEqual(none.group("Dana Levi", "A, B"), "UNMAPPED");
+  assert.strictEqual(none.group("Dana Levi", "A, B"), "-");
 });
 
 test("mainGroup", "an IAI department → IAI", () => assert.strictEqual(S.mainGroup("IAI - Stress Department"), "IAI"));
@@ -126,7 +126,10 @@ test("mantraWho", "empty", () => assert.deepStrictEqual(S.mantraWho([], NAMES), 
 const GRP = S.personGroups(REL, NAMES);
 test("personGroups", "all the groups in order, zeros included", () => assert.deepStrictEqual(GRP.map((x) => x[0]), S.GROUPS));
 test("personGroups", "person–CDF pairs", () => assert.strictEqual(GRP.filter((x) => x[0] === "IAI - Design Engineering")[0][1], 2));
-test("personGroups", "other groups found are added after the list", () => { const r = S.personGroups([{ persons: ["Nobody"], key: "K", V: "" }], NAMES); assert.deepStrictEqual(r[r.length - 1], ["UNMAPPED", 1]); });
+test("personGroups", "confirmed groups are counted and missing groups are omitted", () => {
+  const r = S.personGroups([{ persons: ["One Person"], key: "K", V: "Other confirmed group" }, { persons: ["Nobody"], key: "J", V: "UNMAPPED" }], NAMES);
+  assert.deepStrictEqual(r.slice(S.GROUPS.length), [["Other confirmed group", 1]]);
+});
 test("personGroups", "ANN/SIE", () => assert.strictEqual(GRP.filter((x) => x[0] === "ANN/SIE")[0][1], 1));
 test("personGroups", "the total adds up to the pairs", () => assert.strictEqual(GRP.reduce((s, x) => s + x[1], 0), 4));
 
@@ -160,7 +163,13 @@ test("build", "stage 1's tables come without their TOTAL (it's written as a form
 test("build", "the release tables carried over", () => assert.deepStrictEqual([tbl("cdf24").carried, tbl("cdf24").rows.length], [true, 1]));
 test("build", "missing release tables are named", () => assert.deepStrictEqual(S.build({ cdf: CDF, summary: S1, cfg: CFG, algo: A, mantra: M, current: [] }).missing.length, 4));
 test("build", "rejected sums", () => assert.deepStrictEqual(tbl("rejected").sums, [["REJECTED CDFS", 2], ["REJECTED DOCUMENTS", 2]]));
-test("build", "people not in the list are named", () => { const m = S.build({ cdf: CDF, summary: S1, cfg: { personGroups: [{ group: "IAI", people: ["Someone"] }] }, algo: A, mantra: M, current: [] }); assert.ok(m.unmapped.length >= 1); });
+test("build", "people without a confirmed group are named", () => {
+  const cdf = CDF.map((r) => r.slice());
+  cdf[1][C("V")] = "UNMAPPED";
+  cdf[1][C("X")] = "Unknown Person";
+  const m = S.build({ cdf, summary: S1, cfg: CFG, algo: A, mantra: M, current: [] });
+  assert.ok(m.missingGroups.includes("Unknown Person"));
+});
 
 // ---------------------------------------------------------------- layout
 test("layoutSummary", "CDF STATUS at A1, two empty rows between tables", () => { const a = placed(LAY, "status"), b = placed(LAY, "gcc"); assert.deepStrictEqual([a.r1, a.r2, b.r1], [1, 6, 9]); });

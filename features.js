@@ -191,11 +191,18 @@
   }
 
   // =============== 4. CDF lookup ===============
-  var C = { A: 0, B: 1, C: 2, D: 3, F: col("F"), G: col("G"), H: col("H"), I: col("I"), J: col("J"), K: col("K"), L: col("L"), M: col("M"),
+  var C = { A: 0, B: 1, C: 2, D: 3, E: 4, F: col("F"), G: col("G"), H: col("H"), I: col("I"), J: col("J"), K: col("K"), L: col("L"), M: col("M"),
     N: col("N"), O: col("O"), P: col("P"), R: col("R"), S: col("S"), T: col("T"), U: col("U"), V: col("V"), W: col("W"), X: col("X"),
     Y: col("Y"), Z: col("Z"), AA: col("AA"), AB: col("AB") };
   var G = { A: 0, J: col("J"), AK: col("AK"), AM: col("AM"), AN: col("AN") };
   function cellOf(rows, r, c) { var row = rows[r]; return row && c < row.length ? row[c] : ""; }
+
+  function endOfBlock(cdf, anchor) {
+    var end = anchor + 1;
+    while (end < cdf.length && !trim(cellOf(cdf, end, C.C)) && !trim(cellOf(cdf, end, C.B)) &&
+      [C.R, C.U, C.AA, C.AB].some(function (c) { return trim(cellOf(cdf, end, c)); })) end++;
+    return end;
+  }
 
   function matchesQuery(key, q) {
     var k = trim(key);
@@ -222,14 +229,12 @@
       }
       return { found: false, error: "No CDF " + q + " in the CDF sheet", suggestions: sugg };
     }
-    var a = hits[0], end = a + 1;
-    while (end < cdf.length && !trim(cellOf(cdf, end, C.C)) && !trim(cellOf(cdf, end, C.B)) &&
-      [C.R, C.U, C.AA, C.AB].some(function (c) { return trim(cellOf(cdf, end, c)); })) end++;
+    var a = hits[0], end = endOfBlock(cdf, a);
     var key = trim(cellOf(cdf, a, C.C));
     function f(c) { return trim(cellOf(cdf, a, c)); }
     var res = {
       found: true, key: key, row: a + 1, others: hits.slice(1).map(function (h) { return trim(cellOf(cdf, h, C.C)) + " (row " + (h + 1) + ")"; }),
-      fields: { status: f(C.R), station: f(C.S), signature: f(C.T), received: cellOf(cdf, a, C.F), priority: f(C.G), description: f(C.H),
+      fields: { status: f(C.R), station: f(C.S), signature: f(C.T), received: cellOf(cdf, a, C.F), priority: f(C.G), description: f(C.H), notes: str(cellOf(cdf, a, C.E)),
         tags: f(C.I), dwg: f(C.J), dwgName: f(C.K), nrc: f(C.L), dwgRev: f(C.M), author: f(C.N), adviser: f(C.O), sendTo: f(C.P),
         reason: f(C.Y), classification: f(C.Z), revision: f(C.D) },
       solutions: [], gcc: null, history: []
@@ -462,9 +467,7 @@
     for (var a = 1; a < cdf.length; a++) {
       var key = trim(cellOf(cdf, a, C.C));
       if (!/A330/i.test(key)) continue;
-      var end = a + 1;
-      while (end < cdf.length && !trim(cellOf(cdf, end, C.C)) && !trim(cellOf(cdf, end, C.B)) &&
-        [C.R, C.U, C.AA, C.AB].some(function (c) { return trim(cellOf(cdf, end, c)); })) end++;
+      var end = endOfBlock(cdf, a);
       var docs = [], isOpen = /^open$/i.test(trim(cellOf(cdf, a, C.R)));
       for (var r = a; r < end && docs.length < 8 && isOpen; r++) {   // documents only for open CDFs (keeps the text small)
         var doc = v(cellOf(cdf, r, C.AA)), u = v(cellOf(cdf, r, C.U));
@@ -473,7 +476,7 @@
       var rec = cellOf(cdf, a, C.F);
       rows.push([key, v(cellOf(cdf, a, C.R)), v(cellOf(cdf, a, C.S)), v(cellOf(cdf, a, C.T)), v(cellOf(cdf, a, C.P)),
         v(cellOf(cdf, a, C.J)), v(cellOf(cdf, a, C.K)), typeof rec === "number" ? E.serialToDateString(rec) : v(rec), docs, ready[keyOf(key)] || "",
-        stations[key] ? stations[key][1] : "", stations[key] ? stations[key][2] : 0, stations[key] ? stations[key][3] || "" : ""]);
+        stations[key] ? stations[key][1] : "", stations[key] ? stations[key][2] : 0, stations[key] ? stations[key][3] || "" : "", str(cellOf(cdf, a, C.E))]);
       a = end - 1;
     }
     return { at: (now || new Date()).toISOString(), from: from || "CDF Updater", count: rows.length, rows: rows };
@@ -530,9 +533,12 @@
       var t = (summary.tables || []).filter(function (x) { return x.name === p.table; })[0];
       if (t) t.rows.forEach(function (r) { if (/A330/i.test(str(r[0]))) ready[keyOf(r[0])] = p.person; });
     });
-    var titles = { open: "Open CDFs", conv: "At conversion engineer", fa: "At final approval", pending: "Ready to sign", released: "Released", stuck: STUCK + "+ days at the station" };
+    var titles = { open: "Open CDFs", conv: "At conversion engineer", fa: "At final approval", pending: "Ready to sign", released: "Released", stuck: STUCK + "+ days at the station",
+      ageing: "Open at the same station for 7–13 days", noDoc: "Open without an engineering document", moved7: "Open CDFs that changed station in the last 7 days",
+      released7: "CDFs released in the last 7 days" };
     var title = titles[kind] || (kind.indexOf("station:") === 0 ? "Open — " + kind.slice(8).replace(/^\d+\s*-\s*/, "") : kind);
     var rows = [];
+    var recent = kind === "moved7" || kind === "released7" ? recentChanges(data.log, now) : null;
     for (var a = 1; a < cdf.length; a++) {
       var key = trim(cellOf(cdf, a, C.C));
       if (!/A330/i.test(key)) continue;
@@ -540,7 +546,12 @@
       var at = open ? daysAt(stations[key], now) : null;
       var hit = kind === "open" ? open : kind === "conv" ? open && /^3\s*-/.test(st) : kind === "fa" ? open && /^9\s*-/.test(st)
         : kind === "pending" ? !!ready[keyOf(key)] : kind === "released" ? /^released$/i.test(status)
-        : kind === "stuck" ? !!(at && at.stuck) : kind.indexOf("station:") === 0 ? open && st === kind.slice(8) : false;
+        : kind === "stuck" ? !!(at && at.stuck)
+        : kind === "ageing" ? !!(at && at.min >= 7 && at.min < STUCK)
+        : kind === "noDoc" ? open && up(cellOf(cdf, a, C.U)) === "NO ENG. DOC." && endOfBlock(cdf, a) === a + 1
+        : kind === "moved7" ? open && recent.S[key] === st
+        : kind === "released7" ? /^released$/i.test(status) && recent.R[key] === "Released"
+        : kind.indexOf("station:") === 0 ? open && st === kind.slice(8) : false;
       if (!hit) continue;
       rows.push({ key: key, row: a + 1, status: status, station: st, signature: trim(cellOf(cdf, a, C.T)).replace(/^-$/, ""), supplier: trim(cellOf(cdf, a, C.P)).replace(/^-$/, ""),
         days: at ? at.days : null, min: at ? at.min : null, exact: !!(at && at.exact), stuck: !!(at && at.stuck), ready: ready[keyOf(key)] || "", inGcc: gccKeys ? !!gccKeys[keyOf(key)] : true });
@@ -549,6 +560,20 @@
     rows.sort(function (x, y) { return sortDays(y) - sortDays(x) || (y.days || 0) - (x.days || 0) || (x.row - y.row); });
     var notInGcc = rows.filter(function (r) { return !r.inGcc; }).map(function (r) { return r.key; });
     return { title: title, rows: rows, notInGcc: notInGcc };
+  }
+  function recentChanges(log, now) {
+    var recent = { S: Object.create(null), R: Object.create(null) };
+    var today = ymdOf(now), start = new Date(now);
+    start.setDate(start.getDate() - 6);
+    var since = ymdOf(start);
+    (log || []).slice(1).forEach(function (row) {
+      var col = trim(row[5]), day = logDay(row[0]), before = trim(row[6]), after = trim(row[7]);
+      if (trim(row[2]) !== "CDF" || !recent[col] || day < since || day > today) return;
+      var key = trim(row[4]);
+      if (!before || before === after || trim(row[1]) === UNDO) delete recent[col][key];
+      else recent[col][key] = after;
+    });
+    return recent;
   }
   function stuckCount(stations, now) {
     var exact = 0, atLeast = 0;

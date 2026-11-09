@@ -54,6 +54,13 @@ test("unchanged data -> no changes, checks pass", () => {
   assert.strictEqual(r.info.matched, 4);
   assert.deepStrictEqual(r.info.onlyCdf, []);
 });
+test("known blank CDFs do not count as missing from GCC; active CDFs still do", () => {
+  const extra = [row({ C: "A330-1-763.-" }, 34), row({ C: "A330-1-878" }, 34),
+    row({ C: "A330-1-878.A", R: "Open" }, 34), row({ C: "A330-1-999.-" }, 34)];
+  assert.deepStrictEqual(A.run({ cdf: cdf.concat(extra), gcc }, cfg).info.onlyCdf, ["A330-1-878.A", "A330-1-999.-"]);
+  extra[0][A.col("R")] = "Open";
+  assert.deepStrictEqual(A.run({ cdf: cdf.concat(extra), gcc }, cfg).info.onlyCdf, ["A330-1-763.-", "A330-1-878.A", "A330-1-999.-"]);
+});
 test("summary tables", () => {
   const t = Object.fromEntries(A.run({ cdf, gcc }, cfg).summary.tables.map((x) => [x.name, x.rows]));
   assert.deepStrictEqual(t["CDF STATUS"], [["Open", 4], ["Cancelled", 0], ["Released", 0], ["TOTAL", 4]], "duplicate excluded");

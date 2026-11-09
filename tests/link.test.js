@@ -144,6 +144,15 @@ test("bridgeStatus", "documents with their Mantra status (open CDFs only)", () =
   assert.deepStrictEqual(BS.rows[0][8], [["", "", "NO ENG. DOC."], ["330-92-80-R01", "A", "4 - RELEASED"]]);
   assert.deepStrictEqual(BS.rows[1][8], []);
 });
+test("bridgeStatus", "column E notes survive clipboard transfer with line breaks and revision", () => {
+  const cdf = CDF.map((r) => r.slice());
+  cdf[1][C("E")] = "בדיקה <25>\nNext step";
+  cdf[2][C("E")] = "Continuation, not the CDF note";
+  const text = L.encode(L.KIND_STATUS, F.bridgeStatus(cdf, SUM));
+  const notes = L.statusFor(L.refs("CDF 961.-"), L.decode(text, L.KIND_STATUS).data);
+  assert.strictEqual(notes[0].notes, "בדיקה <25>\nNext step");
+  assert.strictEqual(F.lookupCdf({ cdf }, "961").fields.notes, notes[0].notes);
+});
 test("bridgeStatus", "ready to sign from the pending tables", () => { assert.strictEqual(BS.rows[2][9], "Dana Ben-Ari"); assert.strictEqual(BS.rows[0][9], ""); });
 test("bridgeStatus", "time, source and count", () => { assert.strictEqual(BS.at, "2026-11-06T06:10:00.000Z"); assert.strictEqual(BS.from, "CDF Updater 1.5.0"); assert.strictEqual(BS.count, 3); });
 test("bridgeStatus", "no summary, no sheet", () => { assert.strictEqual(F.bridgeStatus(CDF, null).rows[2][9], ""); assert.deepStrictEqual(F.bridgeStatus(null).rows, []); });
@@ -247,6 +256,21 @@ test("glanceList", "released", () => assert.deepStrictEqual(F.glanceList("releas
 test("glanceList", "days and exactness on each row", () => { const r = F.glanceList("fa", GL, NOV6).rows[0]; assert.deepStrictEqual([r.days, r.exact, r.row], [5, true, 3]); });
 test("glanceList", "stuck uses the least it can be", () => { assert.deepStrictEqual(F.glanceList("stuck", GL, NOV6).rows, []); assert.strictEqual(F.glanceList("stuck", GL, new Date(2026, 10, 25)).rows.length, 2); });
 test("glanceList", "CDFs not in GCC are named", () => assert.deepStrictEqual(F.glanceList("open", Object.assign({ gccKeys: { "A330-1-001": true } }, GL), NOV6).notInGcc, ["A330-1-002.-"]));
+test("glanceList", "progress uses latest logged change, age and the current status", () => {
+  const cdf = GL.cdf.map((r) => r.slice());
+  cdf[1][C("U")] = "NO ENG. DOC.";
+  const log = [LOG[0],
+    ["31/10/2026 08:00", "x", "CDF", 2, "A330-1-001.-", "S", "2 - POC", "3 - Conversion Engineer"],
+    ["06/11/2026 08:00", "x", "CDF", 3, "A330-1-002.-", "S", "2 - POC", "9 - Final Approval"],
+    ["06/11/2026 08:00", "x", "CDF", 4, "A330-1-003.-", "R", "Open", "Released"],
+    ["06/11/2026 08:10", F.UNDO, "CDF", 3, "A330-1-002.-", "S", "9 - Final Approval", "2 - POC"]];
+  const data = Object.assign({}, GL, { cdf, log });
+  const keys = (kind, date) => F.glanceList(kind, data, date || NOV6).rows.map((r) => r.key);
+  assert.deepStrictEqual(keys("moved7"), ["A330-1-001.-"]);
+  assert.deepStrictEqual(keys("released7"), ["A330-1-003.-"]);
+  assert.deepStrictEqual(keys("ageing", new Date(2026, 10, 8)), ["A330-1-002.-"]);
+  assert.deepStrictEqual(keys("noDoc"), ["A330-1-001.-"]);
+});
 test("stuckCount", "nothing on day one", () => assert.deepStrictEqual(F.stuckCount(GL.stations, NOV6), { exact: 0, atLeast: 0, total: 0 }));
 test("stuckCount", "two weeks later", () => assert.deepStrictEqual(F.stuckCount(GL.stations, new Date(2026, 10, 20)), { exact: 1, atLeast: 1, total: 2 }));
 test("stuckCount", "exact only", () => assert.deepStrictEqual(F.stuckCount({ a: ["x", "2026-10-01", 1, "2026-11-06"] }, NOV6), { exact: 1, atLeast: 0, total: 1 }));

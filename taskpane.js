@@ -56,7 +56,13 @@
     wire();
     watchActionBar();
     restoreLocalRules();
-    loadStores().then(function () { return loadRules(); }).then(function () { return fetchPrompt(); });
+    loadStores().then(function () { return loadRules(); }).then(function () {
+      fetchPrompt();
+      if (state.inExcel) {
+        watchCdfNotes();
+        refreshStatusPack().catch(function () { /* the copy button retries */ });
+      }
+    });
   }
 
   if (window.Office && Office.onReady) Office.onReady(start);
@@ -116,6 +122,8 @@
     });
     $("morningBtn").addEventListener("click", morningRun);
     document.addEventListener("paste", onPanePaste);
+    window.addEventListener("storage", function (event) { if (L && event.key === L.LS_NOTES) adoptSharedNotes(); });
+    window.addEventListener("focus", adoptSharedNotes);
     $("glance").addEventListener("click", function (ev) {
       var b = ev.target.closest && ev.target.closest("[data-list]");
       if (b) openList(b.getAttribute("data-list"));
@@ -1109,8 +1117,7 @@
     res.stage2 = {
       ran: true, info: s2.info, errors: s2.errors, cells: plan.changes.length, kinds: kinds, blocks: s2.blocks,   // blocks: stage 4 keeps their match
       catalogs: s2.catalogs || null,                                                                           // stage 4 reads Mantra from here
-      rowsAdded: plan.rowsAdded, rowsRemoved: plan.rowsRemoved,
-      noPeople: !(cfg.personGroups && cfg.personGroups.length)
+      rowsAdded: plan.rowsAdded, rowsRemoved: plan.rowsRemoved
     };
   }
 
@@ -1211,13 +1218,13 @@
     return roundTrips(ctx, reads, READ_BUDGET).then(function () {
       cfs.items.forEach(function (cf) {
         if (cf.type !== "Custom") return;
-        var x = { cf: cf, rule: cf.custom.rule, ranges: canAreas ? cf.getRangesOrNullObject() : null };
+        var x = { cf: cf, rule: cf.custom.rule, ranges: canAreas ? cf.getRanges() : null };
         x.rule.load("formula"); if (x.ranges) x.ranges.load("areaCount");
         custom.push(x);
       });
       return ctx.sync();
     }).then(function () {
-      var found = custom.map(function (x) { return { formula: x.rule.formula, areas: x.ranges && !x.ranges.isNullObject ? x.ranges.areaCount : 1 }; });
+      var found = custom.map(function (x) { return { formula: x.rule.formula, areas: x.ranges ? x.ranges.areaCount : 1 }; });
       rep.found = LK.describeExisting(found, lookFormulas);
       // 110.7 and the saved looks are written again from scratch: one clean rule each; the user's own rules stay
       custom.forEach(function (x) { if (LK.ruleKind(x.rule.formula, lookFormulas)) x.cf.delete(); });
@@ -1280,7 +1287,7 @@
   function lookReportHtml(rep, title, brief) {
     if (!rep) return "";
     if (brief && !rep.error && !rep.skipped) return '<div class="note ok look-report"><b>' + esc(brief) + "</b> " + esc(title) + "</div>";
-    if (rep.error) return '<div class="note warn look-report">' + esc(title || "Sheet look") + ": couldn't be repainted — " + esc(rep.error) + ". The update itself is written; try <b>Repaint CDF</b> on the LOOK page.</div>";
+    if (rep.error) return '<div class="note bad look-report">' + esc(title || "Sheet look") + ": couldn't be repainted — " + esc(rep.error) + ". The update itself is written; try <b>Repaint CDF</b> on the LOOK page.</div>";
     if (rep.skipped) return '<div class="note look-report">' + esc(rep.skipped) + "</div>";
     var fd = rep.found || { pieces: {}, broken: [] }, li = [];
     li.push("Rows 2–" + rep.last + ": Calibri 10, black lines around every cell, S:X purple, Middle Align, Wrap Text.");
@@ -1566,12 +1573,12 @@
     if (!tr.bulk) return '<div class="hint hist-hint trim-roll">' + (applied && tr.done ? "Removed " : "Lets go of ") + esc(what) + " — BACKUPDATA keeps " + (keep ? esc(keep) + " and this run" : "this run") + ", and 8 days of events.</div>";
     if (applied) return tr.done
       ? '<div class="note ok hist-in trim"><b>Older history removed</b> — ' + esc(what) + ". From now on BACKUPDATA keeps the last two committed runs and 8 days of events.</div>"
-      : '<div class="note warn hist-in trim"><b>Older history still there</b> — ' + esc(what) + ". It goes with the next Apply you confirm.</div>";
-    return '<div class="trim-box" role="group" aria-labelledby="trimT"><div class="trim-t" id="trimT">Older history</div>' +
+      : '<div class="hint hist-hint trim-roll">Older history kept — ' + esc(what) + ".</div>";
+    return '<details class="trim-box"><summary class="trim-t">Archive older history</summary>' +
       "<p>BACKUPDATA holds " + esc(what) + ". From now on it keeps the last two committed runs and 8 days of events — what the next comparison and the release tables use. Removing the older rows can't be undone.</p>" +
       '<button id="bkDownload" class="btn" type="button"><svg class="ico"><use href="#i-download"/></svg>Download a backup (.zip)</button>' +
       '<label class="trim-ok"><input type="checkbox" id="trimOk"' + (state.trimConfirmed ? " checked" : "") + "> I have a backup — remove the older history with this Apply</label>" +
-      '<div class="hint" id="bkMsg">No downloads in this Excel? Save a copy of the workbook instead (File › Save a Copy). Without the tick, this Apply only adds the run.</div></div>';
+      '<div class="hint" id="bkMsg">No downloads in this Excel? Save a copy of the workbook instead (File › Save a Copy). Without the tick, this Apply only adds the run.</div></details>';
   }
   // the whole BACKUPDATA, one CSV per area, in a zip — read in chunks so a big sheet doesn't stall Excel
   function downloadBackup() {
@@ -1645,11 +1652,11 @@
     if (car.length) html += '<div class="hint rep-hint">The four release tables (CDFS / DOCUMENTS RELEASED) are kept as they are' + (car[0].title.match(/\(AS OF [^)]*\)/) ? " " + esc(car[0].title.match(/\(AS OF [^)]*\)/)[0]) : "") + " — they are computed from BACKUPDATA when the workbook has sheet Mantra.</div>";
     else if (res.history && res.history.ran) html += '<div class="hint rep-hint">The four release tables are computed from BACKUPDATA — the events of committed runs' + (res.history.out.commits ? ", this run included" : " (this run fails, so its events don't count)") + ".</div>";
     if (rep.model.missing.length) html += '<div class="hint rep-hint">Not in CDF SUMMARY now, so not written: ' + esc(rep.model.missing.join(", ")) + ".</div>";
-    if (rep.model.unmapped.length) {
-      var noList = !(state.rules && state.rules.cdfConfig.personGroups && state.rules.cdfConfig.personGroups.length);
-      html += '<div class="note warn rep-in">' + (noList
-        ? "This workbook has no people list (the PERSON_GROUP lines in SETUP › Workbook settings), so each group is taken from column V — and these people have none there, so they show as UNMAPPED: "
-        : "Not in any PERSON_GROUP of the workbook settings, so shown as UNMAPPED — add them to a group in SETUP › Workbook settings: ") + esc(rep.model.unmapped.join(", ")) + "</div>";
+    if (rep.model.missingGroups.length) {
+      var people = rep.model.missingGroups;
+      html += '<details class="hint rep-hint"><summary>' + (people.length + (people.length === 1 ? " person" : " people")) +
+        ' without a confirmed department</summary><p>' + esc(people.join(", ")) +
+        '. Confirm their departments in SETUP › Workbook settings.</p></details>';
     }
     if (applied && rep.readBack) html += rep.readBack.length
       ? '<div class="note bad rep-in"><b>CDF SUMMARY shows ' + rep.readBack.length + " number" + (rep.readBack.length > 1 ? "s" : "") + " other than computed</b> — is calculation set to Manual? " + esc(rep.readBack.slice(0, 8).map(function (b) { return b.cell + " " + b.got + " (computed " + b.want + ")"; }).join(", ")) + "</div>"
@@ -1692,7 +1699,6 @@
     if (s2.errors.length) html += '<div class="note warn"><b>' + s2.errors.length + " to check</b> — written as CHECK SOLUTION or left as they are:<ul>" +
       s2.errors.slice(0, 30).map(function (e) { return "<li>" + esc((e.key ? e.key + ": " : "") + e.message) + ' <span class="rule">(' + esc(e.stage) + ")</span></li>"; }).join("") +
       (s2.errors.length > 30 ? "<li>and " + (s2.errors.length - 30) + " more…</li>" : "") + "</ul></div>";
-    if (s2.noPeople) html += '<div class="hint mantra-hint">Column V (the group of the person in X) is left as it is: the workbook settings have no PERSON_GROUP lines yet.</div>';
     return html + "</div>";
   }
 
@@ -2888,16 +2894,23 @@
     return readStore(NS_SETTINGS).then(function (s) {
       state.privText = (s && s.privateRules) || "";
       state.signature = (s && s.signature) || [];
-      var mine = privateOnComputer();
-      if (state.privText.trim()) rememberPrivate(state.privText);
-      else if (mine.trim() && storesSupported() && !F.privateLines(mine).length) {
-        // this workbook has none: the ones saved on this computer go in (the file keeps them once it's saved)
-        state.privText = mine;
-        return writeStore(NS_SETTINGS, { privateRules: mine, signature: state.signature, savedAt: new Date().toISOString() }).then(function () {
-          showBanner("The people settings weren't in this workbook — added from this computer (" + mine.split(/\r?\n/).filter(function (l) { return l.trim() && !/^\s*#/.test(l); }).length + " lines). Save the workbook (Ctrl+S) to keep them in the file.", false);
-        }, function () { /* used for this session only */ }).then(function () { return s; });
+      var mine = privateOnComputer(), original = state.privText;
+      if (mine.trim() && !F.privateLines(mine).length && !E.parseRules(mine).errors.length) {
+        if (!original.trim()) state.privText = mine;
+        else if (!E.parseRules(original).cdfConfig.personGroups.length) {
+          var groups = mine.split(/\r?\n/).filter(function (l) { return /^\s*PERSON_GROUP\s/i.test(l); });
+          if (groups.length) {
+            if (!/^\s*PERSON_ALIAS\s/im.test(original)) groups = groups.concat(mine.split(/\r?\n/).filter(function (l) { return /^\s*PERSON_ALIAS\s/i.test(l); }));
+            state.privText = original.trim() + "\n" + groups.join("\n");
+          }
+        }
       }
-      return s;
+      if (state.privText.trim()) rememberPrivate(state.privText);
+      if (state.privText !== original && storesSupported()) {
+        return writeStore(NS_SETTINGS, { privateRules: state.privText, signature: state.signature, savedAt: new Date().toISOString() }).then(function () {
+          showBanner("People settings added from this computer. Save the workbook (Ctrl+S) to keep them in the file.", false);
+        }, function () { /* used for this session only */ });
+      }
     }).then(function () {
       $("privText").value = state.privText;
       return readStore(NS_HISTORY);
@@ -2954,6 +2967,14 @@
       }).join("") + "</div>" + trendSvg(F.trendSeries(state.history.concat(state.history.length && state.history[state.history.length - 1].at === s.at ? [] : [s]), "open", 14)) + "</div>";
     }
     html += stuckLine();
+    if (state.progress) {
+      var labels = { moved7: "MOVED · 7D", released7: "RELEASED · 7D", ageing: "AT STATION · 7–13D", noDoc: "NO ENG. DOC." };
+      html += '<div class="ecam-progress" aria-label="CDF progress">' + Object.keys(labels).map(function (kind) {
+        var count = state.progress[kind];
+        return '<button type="button" class="metric" data-list="' + kind + '"' + (count === null ? ' disabled title="Needs UPDATE LOG"' : "") +
+          '><div class="v">' + (count === null ? "–" : count) + '</div><div class="k">' + labels[kind] + '</div></button>';
+      }).join("") + "</div>";
+    }
     el.innerHTML = html;
   }
   // days at station: a lamp under the display once CDF Updater has tracked the stations
@@ -3393,6 +3414,7 @@
       }).join("") : '<div class="hint">No solution rows yet.</div>') +
       '<div class="lk-h">GCC</div>' + (r.gcc ? '<dl class="lk-grid">' + kv("Row", r.gcc.row) + kv("Status", r.gcc.status) + kv("Station", r.gcc.station) +
         kv("Assignee", r.gcc.assignee) + kv("Final approval", r.gcc.finalApproval) + "</dl>" : '<div class="hint">Not in the GCC sheet.</div>') +
+      (String(f.notes).trim() ? '<div class="lk-h">Notes from CDF · column E</div><div class="lk-desc cdf-notes">' + esc(f.notes) + "</div>" : "") +
       lookupNotesHtml(r.key) +
       '<div class="lk-h">History</div>' + (r.history.length ? '<ul class="lk-hist">' + r.history.slice(0, 30).map(function (h) {
         return '<li><span class="w">' + esc(h.when) + '</span><span class="c">' + esc(h.col) + "</span><span>" + esc(h.before || "(empty)") + " → <b>" + esc(h.after || "(empty)") + "</b>" + (h.by === F.UNDO ? " (undo)" : "") + "</span></li>";
@@ -3424,7 +3446,7 @@
       }
       var gccKeys = null;
       if (data.gcc && data.gcc.length) { gccKeys = {}; data.gcc.forEach(function (r, i) { if (i) gccKeys[E.loose(E.normalizeCdf(r[0]))] = true; }); }
-      return { cdf: data.cdf, summary: summary, stations: state.stations || {}, gccKeys: gccKeys };
+      return { cdf: data.cdf, summary: summary, stations: state.stations || {}, gccKeys: gccKeys, log: data.log };
     });
   }
   function daysText(r) {
@@ -3440,7 +3462,7 @@
       var l = F.glanceList(kind, data, new Date()), max = 400;
       $("listTitle").textContent = l.title;
       $("listCount").textContent = l.rows.length + " CDF" + (l.rows.length === 1 ? "" : "s");
-      var html = (l.notInGcc.length ? '<div class="note warn">The number on the display counts CDFs that are in GCC. ' + l.notInGcc.length + " more " + (l.notInGcc.length === 1 ? "is" : "are") +
+      var html = (l.notInGcc.length && !/^(moved7|released7|ageing|noDoc)$/.test(kind) ? '<div class="note warn">The number on the display counts CDFs that are in GCC. ' + l.notInGcc.length + " more " + (l.notInGcc.length === 1 ? "is" : "are") +
         " only in sheet CDF: " + esc(l.notInGcc.slice(0, 6).join(", ")) + (l.notInGcc.length > 6 ? " …" : "") + "</div>" : "") +
         (kind !== "released" && l.rows.some(function (r) { return r.days != null && !r.exact; }) ? '<p class="hint">"open N d": the day it reached its station isn\'t known yet — CDF Updater learns it from now on. "N+ d": at least that long.</p>' : "") +
         '<ul class="cl-list">' + l.rows.slice(0, max).map(function (r) {
@@ -3656,6 +3678,26 @@
   function shortDate(iso) { var d = new Date(iso); return isNaN(d) ? "" : dateStr(d) + " " + hhmm(d); }
   // the CDF status of every CDF, packed for My Notes; also left in the shared storage
   var LINK_MISSING = "cdf-link.js didn't load — upload it to GitHub with the other files, then reopen the add-in.";
+  function watchCdfNotes() {
+    if (!Office.context.requirements.isSetSupported("ExcelApi", "1.7")) return;
+    var timer, notesCol = window.CdfAlgo.col("E");
+    Excel.run(function (ctx) {
+      var ws = ctx.workbook.worksheets.getItemOrNullObject("CDF");
+      ws.load("name");
+      return ctx.sync().then(function () {
+        if (ws.isNullObject || !ws.onChanged) return;
+        ws.onChanged.add(function (event) {
+          if (!parseAreas(event.address).some(function (a) { return a.r2 > 1 && a.c1 <= notesCol && a.c2 >= notesCol; })) return;
+          state.lookupCache = null;
+          clearTimeout(timer);
+          timer = setTimeout(function () {
+            if (!state.busy) refreshStatusPack().catch(function () { /* Copy is always available */ });
+          }, 500);
+        });
+        return ctx.sync();
+      });
+    }).catch(function () { /* the normal Apply and Copy flows still work */ });
+  }
   function refreshStatusPack() {
     if (!L) return Promise.reject(new Error(LINK_MISSING));
     if (!state.inExcel || !state.rules || !state.rules.cdfAlgorithm) return Promise.resolve(null);
@@ -3670,6 +3712,11 @@
         var tr = F.trackStations(state.stations, data.cdf, lg ? lg.values : [], now);
         state.stations = tr.map; state.stuck = F.stuckCount(tr.map, now);
         if (tr.changed && storesSupported()) writeStore(NS_STATIONS, { map: tr.map, at: now.toISOString() }).catch(function () { /* kept for this session */ });
+        var progressData = { cdf: data.cdf, stations: tr.map, log: lg ? lg.values : [] };
+        state.progress = {};
+        ["moved7", "released7", "ageing", "noDoc"].forEach(function (kind) {
+          state.progress[kind] = !lg && /7$/.test(kind) ? null : F.glanceList(kind, progressData, now).rows.length;
+        });
         renderGlance(false);
         var pack = F.bridgeStatus(data.cdf, summary, now, "CDF Updater " + version(), tr.map);
         var text = L.encode(L.KIND_STATUS, pack);
@@ -3681,10 +3728,9 @@
     });
   }
   function copyStatusForMyNotes(btn) {
-    var fresh = state.statusPack && Date.now() - Date.parse(state.statusPack.at) < 10 * 60000;
     var label = btn.textContent;
     btn.disabled = true; btn.textContent = "Preparing…";
-    (fresh ? Promise.resolve(state.statusPack) : refreshStatusPack()).then(function (p) {
+    refreshStatusPack().then(function (p) {
       if (!p) throw new Error("The CDF algorithm isn't on in rules.txt");
       return copyText(p.text).then(function (ok) {
         var box = $("linkCopyBox");
