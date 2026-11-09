@@ -334,20 +334,36 @@
 
   // 120: person → group (V)
   function personKey(name) { return upper(name).replace(/[\t ]+/g, " ").replace(/[‐-―−]/g, "-").replace(/\s*-\s*/g, "-").replace(/\s+/g, " "); }
-  function makePeople(cfg) {
-    var map = {}, alias = {};
+  function groupLabel(value) {
+    var g = trim(value);
+    return g && !/^(?:-|UNMAPPED|AMBIGUOUS)$/i.test(g) && !/[,;\n]/.test(g) ? g : "";
+  }
+  function makePeople(cfg, cdf) {
+    var map = Object.create(null), alias = Object.create(null), sheet = Object.create(null);
+    function add(groups, name, group) {
+      if (groups[name] && upper(groups[name]) !== upper(group)) groups[name] = "AMBIGUOUS";
+      else groups[name] = group;
+    }
+    function words(name) { return name.split(" ").sort().join(" "); }
     ((cfg && cfg.personGroups) || []).forEach(function (g) {
       (g.people || []).forEach(function (p) {
         var k = personKey(p);
-        if (map[k] && map[k] !== g.group) map[k] = "AMBIGUOUS"; else map[k] = g.group;
+        add(map, k, g.group);
       });
     });
     ((cfg && cfg.personAliases) || []).forEach(function (a) { alias[personKey(a.from)] = personKey(a.to); });
-    return { map: map, alias: alias, empty: !Object.keys(map).length };
+    (cdf || []).slice(1).forEach(function (row) {
+      if (!row) return;
+      var persons = uniqList(row[COLS.X]), group = groupLabel(row[COLS.V]);
+      // A single department in V can describe several people. Multiple departments cannot be paired with X by position.
+      if (group) persons.forEach(function (p) {
+        if (p !== "-") { var k = personKey(p); add(sheet, words(alias[k] || k), group); }
+      });
+    });
+    return { map: map, alias: alias, sheet: sheet };
   }
   function groupOf(name, people) {
     if (isEmpty(name) || trim(name) === "-") return "-";
-    if (people.empty) return null;                                     // no dictionary: V is left as it is
     var k = personKey(name);
     if (people.alias[k]) k = people.alias[k];
     if (people.map[k]) return people.map[k];
@@ -355,7 +371,8 @@
     var w = k.split(" ").sort().join(" ");
     var hits = Object.keys(people.map).filter(function (x) { return x.split(" ").sort().join(" ") === w; });
     var groups = hits.map(function (x) { return people.map[x]; }).filter(function (g, i, a) { return a.indexOf(g) === i; });
-    return groups.length === 1 ? groups[0] : groups.length > 1 ? "AMBIGUOUS" : "UNMAPPED";
+    if (groups.length) return groups.length === 1 ? groups[0] : "AMBIGUOUS";
+    return people.sheet[w] || null;
   }
   // 30.5: U, V, W, X of one record
   function uvwx(rec, people) {
@@ -365,15 +382,16 @@
     if (rec.rejects > 0) {                                                                 // 30.5.2
       if (isEmpty(rec.rejBy) || isEmpty(rec.rejFn)) return { U: U, V: "-", W: "Rejected", X: "-", note: "REJECTED_BY_MISSING_IN_SOURCE" };   // 30.5.2.1
       var rb = uniqList(rec.rejBy).join(", ");
-      return { U: U, V: uniqList(rec.rejBy).map(function (e) { return groupOf(e, people); }).join(","), W: "Rejected | " + uniqList(rec.rejFn).join(", "), X: rb };
+      return { U: U, V: groupsForPeople(uniqList(rec.rejBy), people), W: "Rejected | " + uniqList(rec.rejFn).join(", "), X: rb };
     }
     // 30.5.3 Pending; several people come comma-separated — the same person twice is one (120.5)
     var emps = uniqList(rec.pendEmp), fns = uniqList(rec.pendFn);
     var X = emps.length ? emps.join(", ") : "-", W = fns.length ? fns.join(", ") : "-";
-    var groups = emps.map(function (e) { return groupOf(e, people); });
-    if (groups.some(function (g) { return g === null; })) groups = null;
-    var V = !emps.length ? "-" : groups ? uniqList(groups.join(",")).join(", ") : null;
-    return { U: U, V: V, W: W, X: X };
+    return { U: U, V: groupsForPeople(emps, people), W: W, X: X };
+  }
+  function groupsForPeople(persons, people) {
+    var groups = persons.map(function (p) { return groupLabel(groupOf(p, people)) || "-"; });
+    return uniqList(groups.join(",")).join(", ") || "-";
   }
   function uniqList(v) {
     var seen = {}, out = [];
@@ -423,7 +441,7 @@
    */
   function run(input, cfg, algo) {
     var cdf = input.cdf || [], gcc = input.gcc || [], out = { stage: 2, changes: [], structure: [], errors: [], warnings: [], blocks: [], info: {} };
-    var cat = readMantra(input.mantra), rev = readMantraRev(input.mantraRev), people = makePeople(cfg);
+    var cat = readMantra(input.mantra), rev = readMantraRev(input.mantraRev), people = makePeople(cfg, cdf);
     // the catalogs, for stage 4 to use instead of reading Mantra again (not enumerable: the result itself stays as it was)
     try { Object.defineProperty(out, "catalogs", { value: { cat: cat, rev: rev }, enumerable: false }); } catch (e) { /* very old engine */ }
     if (!cat.ok) { cat.errors.forEach(function (e) { out.errors.push({ stage: "00.1.2", message: e }); }); return out; }   // a partial catalog can't say a document is missing
@@ -490,7 +508,7 @@
         put(b, i, COLS.AA, w.AA, rule, "solution " + (i + 1));
         put(b, i, COLS.AB, w.AB, rule, "revision");
         put(b, i, COLS.U, w.U, rule, "status");
-        if (w.V != null && !/(^|,)null(,|$)/.test(String(w.V))) put(b, i, COLS.V, w.V, rule, "group");
+        put(b, i, COLS.V, w.V, rule, "group");
         put(b, i, COLS.W, w.W, rule, "signature position");
         put(b, i, COLS.X, w.X, rule, "person");
       }
@@ -667,7 +685,7 @@
     layout: layout, applyInMemory: applyInMemory, finalValues: finalValues, combine: combine, rowOpLogRows: rowOpLogRows, parseRowsNote: parseRowsNote,
     normId: normId, revKey: revKey, revShow: revShow, toSerial: toSerial, dayOf: dayOf,
     readMantra: readMantra, readMantraRev: readMantraRev, decodeAnswer: decodeAnswer, parts: parts, oneEdit: oneEdit,
-    resolveIdentity: resolveIdentity, selectRecord: selectRecord, uOf: uOf, uvwx: uvwx, makePeople: makePeople, groupOf: groupOf, personKey: personKey,
+    resolveIdentity: resolveIdentity, selectRecord: selectRecord, uOf: uOf, uvwx: uvwx, makePeople: makePeople, groupOf: groupOf, groupLabel: groupLabel, personKey: personKey,
     EXPLICIT: EXPLICIT, baseKey: baseKey, col: col, cell: cell, trim: trim, upper: upper, solveDoc: solveDoc, run: run
   };
 });

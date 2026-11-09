@@ -69,6 +69,7 @@
   var R_VALUES = { "OPEN": "Open", "CANCELLED": "Cancelled", "CANCELED": "Cancelled", "RELEASED": "Released" };
 
   var DUPLICATE_KEY = "A330-1-052(ANOTHER)";   // 20.3.2 / 100.3
+  var PLACEHOLDERS = ["A330-1-763", "A330-1-878"];
   // people come from the settings (rules.txt / workbook settings), not from the code
 
   // 100.8 supplier display
@@ -168,7 +169,10 @@
       if (m) { b.gcc = m; usedG[m.full] = true; }
     });
     var onlyGcc = gccRows.filter(function (x) { return !usedG[x.full]; }).map(function (x) { return x.key; });
-    var onlyCdf = blocks.filter(function (b) { return !b.gcc && !isDup(b.key); }).map(function (b) { return b.key; });
+    function isPlaceholder(b) {
+      return PLACEHOLDERS.indexOf(keyBase(b.key)) >= 0 && isEmpty(cell(cdf, b.anchor, CDF.R));
+    }
+    var onlyCdf = blocks.filter(function (b) { return !b.gcc && !isDup(b.key) && !isPlaceholder(b); }).map(function (b) { return b.key; });
     if (dupG.length) out.errors.push({ stage: "20.1", message: "Duplicate CDF numbers in GCC: " + dupG.join(", ") });
 
     // --- 20.2 / 20.3 / 00.5 / 00.6: compute the anchor values ---
