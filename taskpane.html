@@ -5,17 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CDF Updater</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-  <script src="lib/jszip.min.js?v=1.11.0"></script>
-  <script src="engine.js?v=1.11.0"></script>
-  <script src="cdf-algo.js?v=1.11.0"></script>
-  <script src="cdf-mantra.js?v=1.11.0"></script>
-  <script src="cdf-summary.js?v=1.11.0"></script>
-  <script src="cdf-history.js?v=1.11.0"></script>
-  <script src="cdf-link.js?v=1.11.0"></script>
-  <script src="features.js?v=1.11.0"></script>
-  <script src="prompt.js?v=1.11.0"></script>
-  <script src="cdf-look.js?v=1.11.0"></script>
-  <link rel="stylesheet" href="taskpane.css?v=1.11.0">
+  <script src="lib/jszip.min.js?v=2.0.0"></script>
+  <script src="cdf-core.js?v=2.0.0"></script>
+  <script src="cdf-link.js?v=2.0.0"></script>
+  <script src="cdf-stats.js?v=2.0.0"></script>
+  <script src="cdf-charts.js?v=2.0.0"></script>
+  <script src="cdf-dash.js?v=2.0.0"></script>
+  <script src="cdf-rows.js?v=2.0.0"></script>
+  <script src="cdf-notes.js?v=2.0.0"></script>
+  <script src="cdf-look.js?v=2.0.0"></script>
+  <script src="cdf-deck.js?v=2.0.0"></script>
+  <link rel="stylesheet" href="taskpane.css?v=2.0.0">
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -30,6 +30,10 @@
     <symbol id="i-undo" viewBox="0 0 16 16"><path d="M5.5 3.5L2.5 6.5l3 3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 6.5h6.5a3.8 3.8 0 0 1 0 7.5H7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
     <symbol id="i-sun" viewBox="0 0 16 16"><circle cx="8" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.4 3.4l1.3 1.3M11.3 11.3l1.3 1.3M3.4 12.6l1.3-1.3M11.3 4.7l1.3-1.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
     <symbol id="i-expand" viewBox="0 0 16 16"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5L9 7M2.5 13.5L7 9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-play" viewBox="0 0 16 16"><path d="M5 3.5v9l7-4.5z" fill="currentColor"/></symbol>
+    <symbol id="i-slides" viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="8.5" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 11.5V14M5.5 14h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
   </svg>
 
   <!-- ===== flight deck: identity, annunciators, upper display ===== -->
@@ -39,26 +43,26 @@
         <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg>
       </span>
       <div class="brand">
-        <h1>CDF Updater <span id="appVersion" class="ver" title="Add-in version">v1.11.0</span></h1>
+        <h1>CDF Updater <span id="appVersion" class="ver" title="Add-in version">v2.0.0</span></h1>
         <p>A330-300 P2F deviation tracker</p>
       </div>
       <button id="lookupOpen" class="deck-btn" type="button" title="Find a CDF (Ctrl+F)" aria-label="Find a CDF"><svg class="ico"><use href="#i-find"/></svg></button>
     </div>
     <div class="lamps" aria-label="Status">
-      <span id="rulesPill" class="lamp" title="Rules file">RULES</span>
-      <span id="algoLamp" class="lamp" title="Algorithm">ALGO</span>
+      <span id="rulesPill" class="lamp" title="Settings file">RULES</span>
+      <span id="sheetsLamp" class="lamp" title="CDF · GCC · MANTRAREV sheets">SHEETS</span>
       <span id="excelLamp" class="lamp" title="Excel">EXCEL</span>
     </div>
-    <section id="glance" class="ecam" aria-label="Today at a glance">
-      <div class="ecam-empty">Run <b>Check changes</b> to see today's numbers.</div>
+    <section id="glance" class="ecam" aria-label="At a glance">
+      <div class="ecam-empty">Reading the workbook…</div>
     </section>
   </header>
 
   <!-- ===== ECAM control panel: pages ===== -->
   <nav class="ecp" role="tablist" aria-label="Pages">
-    <button class="key on" id="tab-today" role="tab" aria-selected="true" aria-controls="page-today" data-page="today" type="button"><span class="key-light"></span>TODAY</button>
-    <button class="key" id="tab-newrows" role="tab" tabindex="-1" aria-selected="false" aria-controls="page-newrows" data-page="newrows" type="button"><span class="key-light"></span>NEW ROWS</button>
-    <button class="key" id="tab-email" role="tab" tabindex="-1" aria-selected="false" aria-controls="page-email" data-page="email" type="button"><span class="key-light"></span>EMAIL</button>
+    <button class="key on" id="tab-status" role="tab" aria-selected="true" aria-controls="page-status" data-page="status" type="button"><span class="key-light"></span>STATUS</button>
+    <button class="key" id="tab-import" role="tab" tabindex="-1" aria-selected="false" aria-controls="page-import" data-page="import" type="button"><span class="key-light"></span>IMPORT</button>
+    <button class="key" id="tab-rows" role="tab" tabindex="-1" aria-selected="false" aria-controls="page-rows" data-page="rows" type="button"><span class="key-light"></span>ROWS</button>
     <button class="key" id="tab-look" role="tab" tabindex="-1" aria-selected="false" aria-controls="page-look" data-page="look" type="button"><span class="key-light"></span>LOOK</button>
     <button class="key" id="tab-setup" role="tab" tabindex="-1" aria-selected="false" aria-controls="page-setup" data-page="setup" type="button"><span class="key-light"></span>SETUP</button>
   </nav>
@@ -66,152 +70,63 @@
   <div id="banner" class="banner hidden"></div>
 
   <main>
-    <!-- ================= TODAY ================= -->
-    <section class="page on" id="page-today" role="tabpanel" aria-labelledby="tab-today">
-
-      <section class="morning" id="morning">
-        <div class="morning-head">
-          <div>
-            <h2>Morning update</h2>
-            <p class="hint">Drop both exports here. The add-in replaces the sheets, checks, applies and prepares the daily email — and stops if anything looks wrong.</p>
-          </div>
-        </div>
-        <div id="morningFiles" class="mfiles"></div>
-        <ol id="morningSteps" class="mplan"></ol>
-        <div id="morningStop"></div>
-        <button id="morningBtn" class="btn primary wide" type="button">Run morning update</button>
-      </section>
-
-      <div class="divider"><span>or step by step</span></div>
-
-      <div class="procedure">
-        <section class="step" id="step1">
-          <div class="step-head">
-            <span class="badge"><span class="num">1</span><svg class="tick"><use href="#i-check"/></svg></span>
-            <h2>Import files</h2>
-            <span class="step-state" id="state1"></span>
-          </div>
-          <div class="step-body">
-            <p class="hint">Each file replaces its sheet in this workbook, in the same position. Drop both files at once and each one finds its own sheet by name.</p>
-            <div id="slots" class="slots"></div>
-            <div id="importConfirm" class="confirm hidden">
-              <p id="importConfirmText"></p>
-              <div class="row">
-                <button id="importYes" class="btn danger">Yes, replace</button>
-                <button id="importNo" class="btn ghost">Cancel</button>
-              </div>
-            </div>
-            <button id="importBtn" class="btn primary wide" disabled>Replace sheets</button>
-          </div>
-        </section>
-
-        <section class="step" id="step2">
-          <div class="step-head">
-            <span class="badge"><span class="num">2</span><svg class="tick"><use href="#i-check"/></svg></span>
-            <h2>Run the algorithm</h2>
-            <span class="step-state" id="state2"></span>
-          </div>
-          <div class="step-body">
-            <div id="algos"></div>
-            <button id="previewBtn" class="btn primary wide">Check changes</button>
-            <div id="results"></div>
-          </div>
-        </section>
+    <!-- ================= STATUS ================= -->
+    <section class="page on" id="page-status" role="tabpanel" aria-labelledby="tab-status">
+      <div class="dash-actions">
+        <button id="dashRefresh" class="btn small" type="button" title="Read the sheets again"><svg class="ico"><use href="#i-refresh"/></svg>Refresh</button>
+        <button id="dashPresent" class="btn small" type="button" title="Full screen, for a meeting"><svg class="ico"><use href="#i-play"/></svg>Present</button>
+        <button id="dashDeck" class="btn small" type="button" title="A PowerPoint deck with these charts"><svg class="ico"><use href="#i-slides"/></svg>PowerPoint</button>
+        <button id="dashCopy" class="btn small" type="button" title="The status as a table, for an email or Teams"><svg class="ico"><use href="#i-copy"/></svg>Copy</button>
       </div>
+      <div id="dashMsg" class="msg dash-msg"></div>
+      <div id="dash" class="dash"><div class="dempty">Reading the workbook…</div></div>
     </section>
 
-    <!-- ================= NEW ROWS ================= -->
-    <section class="page" id="page-newrows" role="tabpanel" aria-labelledby="tab-newrows">
-      <section class="card" id="newRowCard">
-        <div class="card-head">
-          <h2>New CDF rows</h2>
-          <span class="step-state" id="state3"></span>
+    <!-- ================= IMPORT ================= -->
+    <section class="page" id="page-import" role="tabpanel" aria-labelledby="tab-import">
+      <section class="card">
+        <div class="card-head"><h2>Replace sheets</h2></div>
+        <p class="hint">Drop the exports here — all of them at once is fine. Each file is matched to its sheet by its <b>column headers</b>, not its name: CDF, GCC (CDF_List_Export) and MANTRAREV (released documents). A sheet that isn't in the workbook yet is created.</p>
+        <label id="drop" class="drop" tabindex="0">
+          <input id="dropInput" type="file" accept=".xlsx,.xlsm,.csv" multiple hidden>
+          <svg class="ico"><use href="#i-download"/></svg>
+          <span><b>Drop files</b> or click to choose</span>
+        </label>
+        <div id="slots" class="slots"></div>
+        <div id="importConfirm" class="confirm hidden">
+          <p id="importConfirmText"></p>
+          <div class="row"><button id="importYes" class="btn primary small" type="button">Replace</button><button id="importNo" class="btn ghost small" type="button">Cancel</button></div>
         </div>
-        <p class="hint">Claude reads each CDF PDF with its ATT PDF and fills the row. Nothing is written until you approve it. A CDF that is already in the sheet gets its row updated.</p>
-
-        <div id="projectNote"></div>
-
-        <div id="nrProject" class="hidden">
-          <div class="flow">
-            <button id="openProject" class="btn primary wide" type="button"><svg class="ico"><use href="#i-out"/></svg>Open the Claude project</button>
-            <p class="flow-hint">Start a chat in the project, drag in the PDFs (several pairs at once are fine) and send.</p>
-          </div>
-        </div>
-
-        <div id="nrPrompt">
-          <div class="flow">
-            <div class="row wrap">
-              <button id="copyPrompt" class="btn" type="button"><svg class="ico"><use href="#i-copy"/></svg>Copy prompt</button>
-              <button id="openClaude" class="btn ghost" type="button"><svg class="ico"><use href="#i-out"/></svg>Open Claude</button>
-            </div>
-            <p class="flow-hint">Paste the prompt in a new chat, drag in the PDFs (several pairs at once are fine) and send.</p>
-            <div id="copyPromptMsg" class="msg"></div>
-          </div>
-        </div>
-
-        <label class="fld" for="pasteBox">Claude's reply</label>
-        <textarea id="pasteBox" class="inp paste" rows="3" spellcheck="false" placeholder="Click Copy on the code block in Claude's reply and paste it here. It's read as soon as you paste."></textarea>
-        <div class="row between">
-          <span id="pasteMsg" class="msg"></span>
-          <button id="parsePaste" class="btn ghost small" disabled>Read reply</button>
-        </div>
-
-        <div id="newRowForm"></div>
-
-        <details class="setup" id="projectSetup">
-          <summary id="projectSetupTitle">Skip the prompt: set up a Claude Project</summary>
-          <div class="setup-body">
-            <p class="hint">A project keeps the instructions, so each time you only drag in the PDFs. Set it up once:</p>
-            <ol class="setup-steps">
-              <li>In Claude, open <b>Projects</b> and create a project, for example “CDF new rows”.</li>
-              <li>
-                <button id="copyInstructions" class="btn small" type="button"><svg class="ico"><use href="#i-copy"/></svg>Copy project instructions</button>
-                <span class="step-line">and paste them into the project's instructions.</span>
-                <div id="copyInstrMsg" class="msg"></div>
-              </li>
-              <li>
-                <span class="step-line">Copy the project's address from the browser and paste it here:</span>
-                <div class="row">
-                  <input id="projectUrl" class="inp" placeholder="https://claude.ai/project/…" spellcheck="false">
-                  <button id="saveProject" class="btn small" type="button">Save</button>
-                </div>
-                <div id="projectUrlMsg" class="msg"></div>
-              </li>
-            </ol>
-            <div id="projectInfo" class="project-info"></div>
-          </div>
-        </details>
+        <button id="importBtn" class="btn primary wide" type="button" disabled>Replace sheets</button>
+        <div id="importMsg"></div>
       </section>
     </section>
 
-    <!-- ================= EMAIL ================= -->
-    <section class="page" id="page-email" role="tabpanel" aria-labelledby="tab-email">
-      <section class="card" id="mailCard">
-        <div class="card-head">
-          <h2>Send email</h2>
-          <span class="step-state" id="state4"></span>
+    <!-- ================= ROWS ================= -->
+    <section class="page" id="page-rows" role="tabpanel" aria-labelledby="tab-rows">
+      <section class="card">
+        <div class="card-head"><h2>Add or update CDF rows</h2></div>
+        <p class="hint">Paste rows copied from Excel, ChatGPT or Claude: tab-separated text (TSV), CSV, or a JSON table. For each row you choose where it goes: <b>insert below</b> or <b>above</b> a row (a new revision under its CDF), or <b>write over</b> a row (an empty template row, or a CDF that changed).</p>
+        <label class="fld" for="rowsPaste">Rows</label>
+        <textarea id="rowsPaste" class="inp paste code-area" rows="4" spellcheck="false" placeholder="A330-1-723.A&#9;&#9;&#9;08/11/2026&#9;ROUTINE&#9;CLARIFICATION …"></textarea>
+        <div class="row wrap rows-layout">
+          <label class="fld inline" for="rowsLayout">Columns</label>
+          <select id="rowsLayout" class="inp small">
+            <option value="auto">Auto</option>
+            <option value="ai13">13 fields (CDF number, main file, ATT file, date …)</option>
+            <option value="from">From column …</option>
+          </select>
+          <select id="rowsStart" class="inp small hidden" aria-label="First column"></select>
         </div>
-        <label class="fld" for="mailKind">What to send</label>
-        <select id="mailKind" class="inp"></select>
-        <p id="mailKindHint" class="hint"></p>
-
-        <div class="fld">Recipients</div>
-        <div id="groupChips" class="chips groups"></div>
-        <input id="mailTo" class="inp" placeholder="To: name@company.com; …">
-        <input id="mailCc" class="inp" placeholder="Cc">
-        <div class="row wrap tight">
-          <button id="saveGroup" class="btn ghost small" type="button">Save recipients as a group</button>
-        </div>
-        <div id="saveGroupBox" class="row hidden">
-          <input id="groupName" class="inp" placeholder="Group name">
-          <button id="saveGroupYes" class="btn small" type="button">Save</button>
-        </div>
-
-        <label class="fld" for="mailSubject">Subject</label>
-        <input id="mailSubject" class="inp">
-
-        <button id="mailBuild" class="btn primary wide">Prepare email</button>
-        <div id="mailPreview"></div>
+        <div id="rowsPreview"></div>
+        <button id="rowsWrite" class="btn primary wide hidden" type="button">Write to sheet CDF</button>
+        <div id="rowsMsg"></div>
+      </section>
+      <section class="card" id="rowsUndoCard">
+        <div class="card-head"><h2>Undo the last rows</h2></div>
+        <p class="hint" id="rowsUndoInfo">Nothing written yet in this session.</p>
+        <button id="rowsUndo" class="btn small" type="button" disabled><svg class="ico"><use href="#i-undo"/></svg>Undo</button>
+        <div id="rowsUndoMsg"></div>
       </section>
     </section>
 
@@ -222,7 +137,7 @@
           <h2>Sheet look</h2>
           <span class="step-state" id="lookState"></span>
         </div>
-        <p class="hint">The look the algorithm gives sheet CDF (110.6–110.7): S:X in purple, a thin black line around every cell, Released rows green, Cancelled rows red, a line over every solution row. Every Apply redoes it; repaint by hand after editing the sheet yourself.</p>
+        <p class="hint">The look of sheet CDF (110.6–110.7): S:X in purple, a thin black line around every cell, Released rows green, Cancelled rows red, a line over every solution row. Use it after the sheet was replaced or rows were added by hand.</p>
         <div class="look-legend" aria-hidden="true">
           <span class="lg"><i style="background:#60497A"></i>S:X</span>
           <span class="lg"><i style="background:#00B050"></i>Released</span>
@@ -259,69 +174,44 @@
           <h2>Looks in this workbook</h2>
           <span class="step-state" id="looksCount"></span>
         </div>
-        <div id="savedLooks"><p class="hint">None yet. A look you add is kept in this workbook and painted again after every Apply.</p></div>
+        <div id="savedLooks"><p class="hint">None yet. A look you add is kept in this workbook and painted again with every Repaint.</p></div>
       </section>
     </section>
 
+
     <!-- ================= SETUP ================= -->
     <section class="page" id="page-setup" role="tabpanel" aria-labelledby="tab-setup">
-      <section class="card">
-        <div class="card-head"><h2>Undo the last update</h2></div>
-        <p class="hint">Puts back the values the last <b>Apply</b> changed, from the log. Cells that were changed again since then are left as they are and listed.</p>
-        <button id="undoBtn" class="btn" type="button"><svg class="ico"><use href="#i-undo"/></svg>Check what can be undone</button>
-        <div id="undoBox"></div>
-      </section>
-
       <section class="card" id="linkCard">
         <div class="card-head"><h2>Link with My Notes (Outlook)</h2><span class="tag" id="linkTag"></span></div>
-        <p class="hint">My Notes shows CDF status and the Notes from column E. Outlook notes appear separately in the CDF lookup. Use shared local storage where Office supports it, or copy and paste between the add-ins.</p>
-        <div class="link-dir"><span class="link-ico" aria-hidden="true">⇢</span><div><b>To Outlook</b><div class="hint" id="linkOutInfo">The status of every CDF in this workbook.</div></div></div>
+        <div class="link-dir"><span class="link-ico" aria-hidden="true">⇢</span><div><b>To Outlook</b><div class="hint" id="linkOutInfo">The status of every CDF in this workbook, with the Notes of column E.</div></div></div>
         <button id="linkCopy" class="btn primary small" type="button">Copy CDF status for My Notes</button>
-        <p class="hint">Then in Outlook: open My Notes on any email, click an empty spot in it and press Ctrl+V (or <b>Reports → CDF status</b> → paste in the box).</p>
         <textarea id="linkCopyBox" class="inp code-area hidden" rows="3" readonly aria-label="CDF status to copy"></textarea>
-        <div class="link-dir"><span class="link-ico" aria-hidden="true">⇠</span><div><b>From Outlook</b><div class="hint">In My Notes, choose <b>Reports → CDF status → Copy Outlook notes for Excel</b>, then paste in this pane.</div></div></div>
+        <div class="link-dir"><span class="link-ico" aria-hidden="true">⇠</span><div><b>From Outlook</b><div class="hint">In My Notes: <b>Reports → CDF status → Copy Outlook notes for Excel</b>, then paste here. The notes go into <b>column E (Notes)</b> of each CDF, as lines that start with ✉ — your own text in E stays as it is.</div></div></div>
         <textarea id="linkPaste" class="inp code-area" rows="2" spellcheck="false" placeholder="Paste the notes here (Ctrl+V)" aria-label="Notes from My Notes"></textarea>
         <div id="linkMsg" class="msg"></div>
-        <div id="linkUnknown"></div>
+        <div id="linkPlan"></div>
       </section>
 
       <section class="card">
-        <div class="card-head"><h2>Workbook settings</h2><span class="tag" id="privTag"></span></div>
-        <p class="hint">Settings with people's names (stations, suppliers, pending tables, who releases at Final Approval, email groups, the Claude Project link) can live <b>inside this workbook</b> instead of in the public rules.txt on GitHub. Lines here are added to rules.txt and win over it.</p>
-        <textarea id="privText" class="inp code-area" rows="7" spellcheck="false" placeholder='PENDING_TABLE "MOR PENDING TABLE" "First Last"&#10;FINAL_APPROVAL_RELEASE "First Last"'></textarea>
-        <div class="row wrap">
-          <button id="privSave" class="btn primary small" type="button">Save to workbook</button>
-          <button id="privMove" class="btn small" type="button">Copy the settings lines from rules.txt</button>
-        </div>
-        <div id="privMsg" class="msg"></div>
-      </section>
-
-      <section class="card">
-        <div class="card-head"><h2>Look</h2></div>
+        <div class="card-head"><h2>Look of the pane</h2></div>
         <div class="seg" role="radiogroup" aria-label="Theme">
           <button type="button" data-theme-choice="auto" class="on">Auto</button>
           <button type="button" data-theme-choice="light">Light</button>
           <button type="button" data-theme-choice="dark">Dark</button>
         </div>
-        <p class="hint" id="historyInfo"></p>
+        <p class="hint" id="trendInfo"></p>
       </section>
 
       <section class="card rules-foot">
-        <div class="card-head"><h2>Rules file</h2></div>
+        <div class="card-head"><h2>Settings file (rules.txt)</h2></div>
         <p class="hint" id="rulesSource"></p>
         <div id="rulesErrors"></div>
         <div class="row wrap">
-          <button id="reloadRules" class="btn ghost small">Reload</button>
-          <label class="btn ghost small">
-            Load file from computer
-            <input id="localRules" type="file" accept=".txt,text/plain" hidden>
-          </label>
-          <button id="useGithub" class="btn ghost small hidden">Back to the GitHub file</button>
+          <button id="reloadRules" class="btn ghost small" type="button">Reload</button>
+          <label class="btn ghost small">Load file from computer<input id="localRules" type="file" accept=".txt,text/plain" hidden></label>
+          <button id="useGithub" class="btn ghost small hidden" type="button">Back to the GitHub file</button>
         </div>
-        <details class="rules-text">
-          <summary>Show file contents</summary>
-          <pre id="rulesText"></pre>
-        </details>
+        <details class="rules-text"><summary>Show file contents</summary><pre id="rulesText"></pre></details>
       </section>
     </section>
   </main>
@@ -350,23 +240,11 @@
     </div>
   </div>
 
-  <!-- large email preview (when the Office dialog is not available) -->
-  <div id="bigPreview" class="sheet hidden" role="dialog" aria-label="Email preview">
-    <div class="sheet-card wide">
-      <div class="sheet-head">
-        <b id="bigPreviewTitle">Email preview</b>
-        <button id="bigPreviewClose" class="icon-btn" type="button" aria-label="Close"><svg class="ico"><use href="#i-x"/></svg></button>
-      </div>
-      <div id="bigPreviewBody" class="sheet-body mailsheet"></div>
-    </div>
-  </div>
 
-  <!-- action bar: status + the next thing to do -->
   <footer class="actionbar" id="actionbar">
     <div id="status" class="ab-status hidden" role="status"><span class="spinner"></span><span id="statusText"></span></div>
-    <button id="abPrimary" class="btn ab-btn hidden" type="button"></button>
   </footer>
 
-  <script src="taskpane.js?v=1.11.0"></script>
+  <script src="taskpane.js?v=2.0.0"></script>
 </body>
 </html>

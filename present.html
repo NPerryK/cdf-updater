@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CDF status — present</title>
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <script src="cdf-core.js?v=2.0.0"></script>
+  <script src="cdf-stats.js?v=2.0.0"></script>
+  <script src="cdf-charts.js?v=2.0.0"></script>
+  <script src="cdf-dash.js?v=2.0.0"></script>
+  <link rel="stylesheet" href="taskpane.css?v=2.0.0">
+  <style>
+    html, body { background: var(--ground); }
+    body { min-height: 100vh; }
+    .p-bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; padding: 12px 22px; background: var(--deck); color: #e8eef4; }
+    .p-bar h1 { font-family: var(--display); font-weight: 600; font-size: 20px; letter-spacing: .02em; }
+    .p-bar .p-date { color: #9fb2c4; font-size: 14px; }
+    .p-bar .sp { flex: 1; }
+    .p-bar button { background: #2b3845; color: #e8eef4; border: 1px solid #3d4a58; border-radius: 6px; padding: 6px 12px; font: 600 13px var(--body); cursor: pointer; }
+    .p-bar button.on { border-color: var(--e-green); color: #fff; box-shadow: inset 0 -2px 0 var(--e-green); }
+    .p-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(540px, 1fr)); gap: 16px; padding: 18px 22px 30px; }
+    .p-grid .dcard { margin: 0; }
+    .dcard .dhead h3 { font-size: 19px; }
+    .chart .t-label, .chart .t-val { font-size: 13px; } .chart .t-axis { font-size: 11px; }
+    .kpi .kn { font-size: 40px; } .kpi .kl { font-size: 13px; }
+    .dnote, .oldest, .wkline { font-size: 14px; }
+    /* one card at a time */
+    body.slides .p-grid { grid-template-columns: 1fr; max-width: 1100px; margin: 0 auto; padding-top: 28px; }
+    body.slides .dcard { display: none; padding: 26px 30px; }
+    body.slides .dcard.cur { display: block; }
+    body.slides .dcard .dhead h3 { font-size: 28px; }
+    body.slides .chart .t-label, body.slides .chart .t-val { font-size: 15px; }
+    .p-count { color: #9fb2c4; font-size: 13px; min-width: 52px; text-align: right; }
+    .p-list { position: fixed; inset: 60px 22px 22px auto; width: 420px; max-width: calc(100vw - 44px); overflow: auto; background: var(--page); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); padding: 14px 16px; z-index: 3; }
+    .p-list h2 { font-family: var(--display); font-size: 18px; margin-bottom: 8px; }
+    .p-list ol { margin: 0 0 0 20px; font-size: 14px; line-height: 1.7; columns: 2; }
+    .p-empty { padding: 60px 22px; color: var(--muted); font-size: 16px; }
+  </style>
+</head>
+<body>
+  <div class="p-bar">
+    <h1>A330-300 P2F — CDF status</h1><span class="p-date" id="pDate"></span><span class="sp"></span>
+    <button id="pGrid" class="on" type="button">All</button><button id="pSlides" type="button">One at a time</button>
+    <span class="p-count" id="pCount"></span><button id="pFull" type="button" title="Full screen (F)">⤢</button>
+  </div>
+  <main id="pMain" class="p-grid"></main>
+  <div id="pList" class="p-list hidden"></div>
+  <script>
+  (function () {
+    "use strict";
+    var data = null, lists = {}, cur = 0, cards = [];
+    try { data = JSON.parse(localStorage.getItem("cdfUpdater.present.v2") || "null"); } catch (e) { data = null; }
+    var main = document.getElementById("pMain");
+    if (!data || !data.model) { main.innerHTML = '<div class="p-empty">Open this from the add-in: STATUS › Present.</div>'; return; }
+    document.documentElement.setAttribute("data-theme", data.theme === "dark" ? "dark" : "light");
+    var r = CdfDash.render(data.model, { mode: "present" });
+    lists = r.lists; main.innerHTML = r.html;
+    document.getElementById("pDate").textContent = CdfCore.ddmmyyyy(data.model.today);
+    cards = Array.prototype.slice.call(main.querySelectorAll(".dcard"));
+    function show(i) { cur = (i + cards.length) % cards.length; cards.forEach(function (c, j) { c.classList.toggle("cur", j === cur); }); document.getElementById("pCount").textContent = document.body.classList.contains("slides") ? (cur + 1) + " / " + cards.length : ""; }
+    function mode(slides) { document.body.classList.toggle("slides", slides); document.getElementById("pSlides").classList.toggle("on", slides); document.getElementById("pGrid").classList.toggle("on", !slides); show(cur); }
+    document.getElementById("pGrid").onclick = function () { mode(false); };
+    document.getElementById("pSlides").onclick = function () { mode(true); };
+    document.getElementById("pFull").onclick = full;
+    function full() { try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); } catch (e) { /* not here */ } }
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key === "f" || ev.key === "F") full();
+      else if (ev.key === "Escape") document.getElementById("pList").classList.add("hidden");
+      else if (document.body.classList.contains("slides") && (ev.key === "ArrowRight" || ev.key === "PageDown" || ev.key === " ")) { ev.preventDefault(); show(cur + 1); }
+      else if (document.body.classList.contains("slides") && (ev.key === "ArrowLeft" || ev.key === "PageUp")) { ev.preventDefault(); show(cur - 1); }
+    });
+    main.addEventListener("click", function (ev) {
+      var t = ev.target.closest("[data-list]"), box = document.getElementById("pList");
+      if (!t) { box.classList.add("hidden"); return; }
+      var l = lists[t.getAttribute("data-list")];
+      if (!l) return;
+      box.innerHTML = "<h2>" + CdfCharts.esc(l.title) + " · " + l.keys.length + "</h2><ol>" + l.keys.map(function (k) { return "<li>" + CdfCharts.esc(k) + "</li>"; }).join("") + "</ol>";
+      box.classList.remove("hidden");
+    });
+    show(0);
+    if (window.Office && Office.onReady) Office.onReady(function () {});
+  })();
+  </script>
+</body>
+</html>

@@ -3,9 +3,7 @@
 // At least 5 cases for every function.
 const assert = require("assert");
 const L = require("../cdf-link.js");
-const F = require("../features.js");
-const A = require("../cdf-algo.js");
-
+const C = require("../cdf-core.js").col;
 let passed = 0, failed = 0;
 const perFn = {};
 function test(fn, name, body) {
@@ -123,7 +121,6 @@ test("dueNotes", "no due date", () => assert.deepStrictEqual(L.dueNotes([{ state
 test("dueNotes", "nothing pasted", () => assert.deepStrictEqual(L.dueNotes(null, NOW), []));
 
 // ---------------- bridgeStatus / notesInfo (Excel side) ----------------
-const C = A.col;
 function row(obj, w) { const r = new Array(w || 30).fill(""); for (const [k, v] of Object.entries(obj)) r[C(k)] = v; return r; }
 const CDF = [
   row({ C: "CDF NUM" }),
@@ -133,8 +130,8 @@ const CDF = [
   row({ A: "link", B: "link" }),
   row({ C: "A330-1-279.-", R: "Open", S: "9 - Final Approval", T: "Dana Ben-Ari", U: "4 - RELEASED", AA: "DOC-279" }),
 ];
-const SUM = { pendingPeople: [{ table: "DANA PENDING TABLE", person: "Dana Ben-Ari" }], tables: [{ name: "DANA PENDING TABLE", rows: [["A330-1-279.-", "DOC-279"], ["TOTAL", 1]] }] };
-const BS = F.bridgeStatus(CDF, SUM, new Date(Date.UTC(2026, 10, 6, 6, 10)), "CDF Updater 1.5.0");
+const N = require("../cdf-notes.js");
+const BS = N.bridgeStatus(CDF, new Date(Date.UTC(2026, 10, 6, 6, 10)), "CDF Updater 1.5.0");
 test("bridgeStatus", "one row per CDF, solution rows folded in", () => assert.deepStrictEqual(BS.rows.map((r) => r[0]), ["A330-1-961.-", "A330-1-740.-", "A330-1-279.-"]));
 test("bridgeStatus", "fields in the shared column order", () => {
   const o = L.rowObj(BS.rows[0]);
@@ -144,28 +141,12 @@ test("bridgeStatus", "documents with their Mantra status (open CDFs only)", () =
   assert.deepStrictEqual(BS.rows[0][8], [["", "", "NO ENG. DOC."], ["330-92-80-R01", "A", "4 - RELEASED"]]);
   assert.deepStrictEqual(BS.rows[1][8], []);
 });
-test("bridgeStatus", "column E notes survive clipboard transfer with line breaks and revision", () => {
-  const cdf = CDF.map((r) => r.slice());
-  cdf[1][C("E")] = "בדיקה <25>\nNext step";
-  cdf[2][C("E")] = "Continuation, not the CDF note";
-  const text = L.encode(L.KIND_STATUS, F.bridgeStatus(cdf, SUM));
-  const notes = L.statusFor(L.refs("CDF 961.-"), L.decode(text, L.KIND_STATUS).data);
-  assert.strictEqual(notes[0].notes, "בדיקה <25>\nNext step");
-  assert.strictEqual(F.lookupCdf({ cdf }, "961").fields.notes, notes[0].notes);
-});
-test("bridgeStatus", "ready to sign from the pending tables", () => { assert.strictEqual(BS.rows[2][9], "Dana Ben-Ari"); assert.strictEqual(BS.rows[0][9], ""); });
+test("bridgeStatus", "2.0 computes no pending tables: ready to sign is empty", () => { assert.strictEqual(BS.rows[2][9], ""); assert.strictEqual(BS.rows[0][9], ""); });
 test("bridgeStatus", "time, source and count", () => { assert.strictEqual(BS.at, "2026-11-06T06:10:00.000Z"); assert.strictEqual(BS.from, "CDF Updater 1.5.0"); assert.strictEqual(BS.count, 3); });
-test("bridgeStatus", "no summary, no sheet", () => { assert.strictEqual(F.bridgeStatus(CDF, null).rows[2][9], ""); assert.deepStrictEqual(F.bridgeStatus(null).rows, []); });
 test("bridgeStatus", "round trip through the clipboard text", () => {
   const r = L.decode(L.encode(L.KIND_STATUS, BS), L.KIND_STATUS);
-  assert.ok(r.ok); assert.strictEqual(L.statusFor(L.refs("Re: CDF 279"), r.data)[0].ready, "Dana Ben-Ari");
+  assert.ok(r.ok); assert.strictEqual(L.statusFor(L.refs("Re: CDF 279"), r.data)[0].station, "9 - Final Approval");
 });
-test("notesInfo", "counts notes, CDFs and open ones", () => assert.deepStrictEqual(F.notesInfo({ notes: NOTES }), { notes: 5, cdfs: 5, open: 3 }));
-test("notesInfo", "nothing pasted", () => assert.deepStrictEqual(F.notesInfo(null), { notes: 0, cdfs: 0, open: 0 }));
-test("notesInfo", "empty list", () => assert.deepStrictEqual(F.notesInfo({ notes: [] }), { notes: 0, cdfs: 0, open: 0 }));
-test("notesInfo", "a CDF in two notes counts once", () => assert.strictEqual(F.notesInfo({ notes: [{ refs: ["A"] }, { refs: ["A"] }] }).cdfs, 1));
-test("notesInfo", "notes without refs", () => assert.deepStrictEqual(F.notesInfo({ notes: [{ state: "Done" }] }), { notes: 1, cdfs: 0, open: 0 }));
-
 // ---------------- phaseOf / stationDays / parseDay / ymd ----------------
 test("phaseOf", "initiator and POC", () => { assert.strictEqual(L.phaseOf("Open", "1 - Initiator").index, 0); assert.strictEqual(L.phaseOf("Open", "2 - POC").index, 1); });
 test("phaseOf", "engineering stations 3–8", () => { assert.strictEqual(L.phaseOf("Open", "3 - Conversion Engineer").index, 2); assert.strictEqual(L.phaseOf("Open", "4 - AVIONICS").index, 2); });
@@ -223,65 +204,6 @@ const TR_CDF = [
 ];
 const LOG = [["When", "By", "Sheet", "Row", "CDF", "Col", "Before", "After", "Note"], ["01/11/2026 08:10", "x", "CDF", 3, "A330-1-002.-", "S", "3 - Conversion Engineer", "9 - Final Approval", ""]];
 const NOV6 = new Date(2026, 10, 6);
-test("trackStations", "first time: log date (exact) or received date (not exact)", () => {
-  const t = F.trackStations(null, TR_CDF, LOG, NOV6);
-  assert.deepStrictEqual(t.map["A330-1-002.-"], ["9 - Final Approval", "2026-11-01", 1, "2026-11-06"]);
-  assert.deepStrictEqual(t.map["A330-1-001.-"], ["3 - Conversion Engineer", "2026-10-05", 0, "2026-11-06"]);
-});
-test("trackStations", "only open CDFs", () => assert.ok(!("A330-1-003.-" in F.trackStations(null, TR_CDF, [], NOV6).map)));
-test("trackStations", "same station → kept, nothing changed", () => { const a = F.trackStations(null, TR_CDF, [], NOV6); const b = F.trackStations(a.map, TR_CDF, [], new Date(2026, 10, 9)); assert.strictEqual(b.changed, false); assert.deepStrictEqual(b.map, a.map); });
-test("trackStations", "a new station → today, exact", () => {
-  const a = F.trackStations(null, TR_CDF, [], NOV6).map, moved = TR_CDF.map((r) => r.slice()); moved[1][C("S")] = "9 - Final Approval";
-  assert.deepStrictEqual(F.trackStations(a, moved, [], new Date(2026, 10, 9)).map["A330-1-001.-"], ["9 - Final Approval", "2026-11-09", 1, "2026-11-09"]);
-});
-test("trackStations", "released since → dropped, and that is a change", () => {
-  const a = F.trackStations(null, TR_CDF, [], NOV6).map, rel = TR_CDF.map((r) => r.slice()); rel[2][C("R")] = "Released";
-  const b = F.trackStations(a, rel, [], NOV6); assert.strictEqual(b.changed, true); assert.ok(!("A330-1-002.-" in b.map));
-});
-test("trackStations", "a log change to another station isn't used", () => assert.strictEqual(F.trackStations(null, TR_CDF, [LOG[0], ["01/11/2026 08:10", "x", "CDF", 2, "A330-1-001.-", "S", "", "2 - POC", ""]], NOV6).map["A330-1-001.-"][2], 0));
-test("daysSince", "days", () => assert.strictEqual(F.daysSince("2026-11-01", NOV6), 5));
-test("daysSince", "today", () => assert.strictEqual(F.daysSince("2026-11-06", new Date(2026, 10, 6, 23)), 0));
-test("daysSince", "future → 0", () => assert.strictEqual(F.daysSince("2026-12-01", NOV6), 0));
-test("daysSince", "bad", () => { assert.strictEqual(F.daysSince("", NOV6), null); assert.strictEqual(F.daysSince("01/11/2026", NOV6), null); });
-test("daysSince", "across months", () => assert.strictEqual(F.daysSince("2026-10-06", NOV6), 31));
-test("daysAt", "exact", () => assert.deepStrictEqual(F.daysAt(["x", "2026-10-20", 1, "2026-11-06"], NOV6), { days: 17, min: 17, exact: true, stuck: true }));
-test("daysAt", "not exact, just seen", () => assert.deepStrictEqual(F.daysAt(["x", "2026-10-05", 0, "2026-11-06"], NOV6), { days: 32, min: 0, exact: false, stuck: false }));
-test("daysAt", "not exact, seen there 14 days ago", () => assert.strictEqual(F.daysAt(["x", "2026-10-05", 0, "2026-10-23"], NOV6).stuck, true));
-test("daysAt", "missing", () => assert.strictEqual(F.daysAt(null, NOV6), null));
-test("daysAt", "first seen missing (older data)", () => assert.deepStrictEqual(F.daysAt(["x", "2026-10-05", 0], NOV6), { days: 32, min: 0, exact: false, stuck: false }));
-const GL = { cdf: TR_CDF, summary: SUM, stations: F.trackStations(null, TR_CDF, LOG, NOV6).map };
-test("glanceList", "open, longest first", () => { const l = F.glanceList("open", GL, NOV6); assert.strictEqual(l.title, "Open CDFs"); assert.deepStrictEqual(l.rows.map((r) => r.key), ["A330-1-002.-", "A330-1-001.-"]); });
-test("glanceList", "by station", () => { assert.deepStrictEqual(F.glanceList("conv", GL, NOV6).rows.map((r) => r.key), ["A330-1-001.-"]); assert.deepStrictEqual(F.glanceList("station:9 - Final Approval", GL, NOV6).rows.map((r) => r.key), ["A330-1-002.-"]); });
-test("glanceList", "released", () => assert.deepStrictEqual(F.glanceList("released", GL, NOV6).rows.map((r) => r.key), ["A330-1-003.-"]));
-test("glanceList", "days and exactness on each row", () => { const r = F.glanceList("fa", GL, NOV6).rows[0]; assert.deepStrictEqual([r.days, r.exact, r.row], [5, true, 3]); });
-test("glanceList", "stuck uses the least it can be", () => { assert.deepStrictEqual(F.glanceList("stuck", GL, NOV6).rows, []); assert.strictEqual(F.glanceList("stuck", GL, new Date(2026, 10, 25)).rows.length, 2); });
-test("glanceList", "CDFs not in GCC are named", () => assert.deepStrictEqual(F.glanceList("open", Object.assign({ gccKeys: { "A330-1-001": true } }, GL), NOV6).notInGcc, ["A330-1-002.-"]));
-test("glanceList", "progress uses latest logged change, age and the current status", () => {
-  const cdf = GL.cdf.map((r) => r.slice());
-  cdf[1][C("U")] = "NO ENG. DOC.";
-  const log = [LOG[0],
-    ["31/10/2026 08:00", "x", "CDF", 2, "A330-1-001.-", "S", "2 - POC", "3 - Conversion Engineer"],
-    ["06/11/2026 08:00", "x", "CDF", 3, "A330-1-002.-", "S", "2 - POC", "9 - Final Approval"],
-    ["06/11/2026 08:00", "x", "CDF", 4, "A330-1-003.-", "R", "Open", "Released"],
-    ["06/11/2026 08:10", F.UNDO, "CDF", 3, "A330-1-002.-", "S", "9 - Final Approval", "2 - POC"]];
-  const data = Object.assign({}, GL, { cdf, log });
-  const keys = (kind, date) => F.glanceList(kind, data, date || NOV6).rows.map((r) => r.key);
-  assert.deepStrictEqual(keys("moved7"), ["A330-1-001.-"]);
-  assert.deepStrictEqual(keys("released7"), ["A330-1-003.-"]);
-  assert.deepStrictEqual(keys("ageing", new Date(2026, 10, 8)), ["A330-1-002.-"]);
-  assert.deepStrictEqual(keys("noDoc"), ["A330-1-001.-"]);
-});
-test("stuckCount", "nothing on day one", () => assert.deepStrictEqual(F.stuckCount(GL.stations, NOV6), { exact: 0, atLeast: 0, total: 0 }));
-test("stuckCount", "two weeks later", () => assert.deepStrictEqual(F.stuckCount(GL.stations, new Date(2026, 10, 20)), { exact: 1, atLeast: 1, total: 2 }));
-test("stuckCount", "exact only", () => assert.deepStrictEqual(F.stuckCount({ a: ["x", "2026-10-01", 1, "2026-11-06"] }, NOV6), { exact: 1, atLeast: 0, total: 1 }));
-test("stuckCount", "empty", () => assert.deepStrictEqual(F.stuckCount({}, NOV6), { exact: 0, atLeast: 0, total: 0 }));
-test("stuckCount", "no map", () => assert.deepStrictEqual(F.stuckCount(null, NOV6), { exact: 0, atLeast: 0, total: 0 }));
-test("bridgeStatus", "carries the station date", () => {
-  const b = F.bridgeStatus(TR_CDF, null, NOV6, "x", GL.stations), o = L.rowObj(b.rows[1]);
-  assert.deepStrictEqual([o.since, o.exact, o.seen], ["2026-11-01", 1, "2026-11-06"]);
-  assert.strictEqual(L.stationDays(o, NOV6).days, 5);
-});
-
 const counts = Object.entries(perFn).filter(([, n]) => n < 5);
 if (counts.length) process.exitCode = 1;
 console.log(`\n${passed} tests passed, ${failed} failed` + (counts.length ? " — fewer than 5 cases: " + counts.map(([f, n]) => f + " (" + n + ")").join(", ") : " — every function has 5+ cases"));

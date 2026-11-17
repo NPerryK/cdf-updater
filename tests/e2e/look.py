@@ -98,7 +98,7 @@ def boot(browser, extra_init="", parts=None, sheets=None):
     page.add_init_script("window.__fixtures={}; window.__initialSheets=%s; window.__xmlParts=%s; window.__opened=[]; %s" % (json.dumps(sheets or SHEETS), json.dumps(parts or [{"id": "x0", "xml": enc(NS_S, {"privateRules": PEOPLE})}]), extra_init))
     page.add_init_script("window.open = function (u) { window.__opened.push(u); }; Object.defineProperty(navigator, 'clipboard', { value: { writeText: function (t) { window.__clip = t; return Promise.resolve(); } } });")
     page.goto("https://addin.test/taskpane.html")
-    page.wait_for_selector("#rulesPill.ok, #rulesPill.bad", timeout=20000)
+    page.wait_for_selector("#dash .dcard, #dash .dempty", timeout=20000)
     return page
 def cfs(page): return page.evaluate("window.__wb.get('CDF').cfs.map(r => ({ f: r.custom.rule.formula, a: r.areas.map(b => [b.r1+1,b.c1,b.r2+1,b.c2]), fill: r.custom.format.fill.color, font: r.custom.format.font.color, bold: r.custom.format.font.bold, italic: r.custom.format.font.italic, top: (r.custom.format.borders.items.EdgeTop||{}).color }))")
 def addr(a):
@@ -193,7 +193,7 @@ with sync_playwright() as p:
     page.fill("#lookPaste", '{"looks":[{"when":{"col":"R","op":"between","value":[1,2]},"paint":{"fill":"red"}}]}'); page.wait_for_selector("#lookPreview .note.bad", timeout=10000)
     check("isn't an operation" in page.inner_text("#lookPreview"), page.inner_text("#lookPreview")[:90])
 
-    print("\nThe looks survive reopening the workbook and an Apply")
+    print("\nThe looks survive reopening the workbook, and Repaint keeps them")
     parts = page.evaluate("window.__xmlParts")
     sheets_now = page.evaluate("""window.__wb.sheets.map(s => ({ name: s.name, values: s.values, f: s.f, merges: s.merges, formats: s.formats, heights: s.heights,
       hidden: s.hidden.map((h, i) => h ? i + 1 : 0).filter(Boolean),
@@ -203,21 +203,16 @@ with sync_playwright() as p:
     page = boot(browser, parts=parts, sheets=sheets_now)
     page.click("#tab-look")
     check(page.inner_text("#looksCount") == "2", "2 looks read back from the workbook")
-    page.click("#tab-today")
-    page.click("#previewBtn"); page.wait_for_selector("#results .verdict", timeout=60000)
-    check("At Apply, the look of rows 2–7" in page.inner_text("#results") and "2 saved looks" in page.inner_text("#results"), "Check changes says what Apply paints")
-    page.click("#applyBtn"); page.wait_for_selector("#undoNow", timeout=60000)
-    res = page.inner_text("#results")
-    check("Sheet look ✓" in res and "2 saved looks painted again" in res, "Apply painted the sheet and the looks")
+    page.click("#repaintBtn"); page.wait_for_selector("#repaintMsg .look-report", timeout=20000)
+    check("2 saved looks painted again" in page.inner_text("#repaintMsg"), "Repaint paints the sheet and the 2 saved looks")
     R4 = cfs(page)
-    vals = page.evaluate("window.__wb.get('CDF').values.length")
     check(sum(1 for r in R4 if "TODAY()" in r["f"] or "SEARCH" in r["f"]) == 2 and len(R4) == 6, "3 rules + 2 looks + the user's own, no duplicates: %d rules" % len(R4))
     contr = [r for r in R4 if r["f"] in ("=TRUE", "=FALSE")][0]
-    check(contr["f"] == "=FALSE" and areas(contr) == "Q2:X7, AA2:AH7", "Apply removed 901's two extra solution rows: the line rule follows (=FALSE, no solution rows): " + areas(contr))
-    check(areas([r for r in R4 if "Released" in r["f"]][0]) == "A2:AH7", "Released / Cancelled now end at row 7")
+    check(contr["f"] == "=TRUE" and areas(contr) == "Q3:X4, AA3:AH4", "the line over 901's two solution rows: " + areas(contr))
 
     print("\nRemove a look")
     page.click("#tab-look")
+    page.evaluate("document.getElementById('repaintMsg').innerHTML = ''")
     page.click("[data-unlook='0']"); page.wait_for_selector("#repaintMsg .look-report", timeout=20000)
     R5 = cfs(page)
     check(not any("TODAY()" in r["f"] for r in R5) and any("SEARCH" in r["f"] for r in R5), "its rule is gone, the other stays")

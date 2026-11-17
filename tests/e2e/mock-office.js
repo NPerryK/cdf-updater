@@ -394,6 +394,7 @@
     return new Range(sh, 0, 0, lastR + 1, lastC + 1);
   };
   Worksheet.prototype.getRangeByIndexes = function (r, c, nr, nc) { return new Range(this._sh, r, c, nr, nc); };
+  Worksheet.prototype.getCell = function (r, c) { return new Range(this._sh, r, c, 1, 1); };
   Worksheet.prototype.getRanges = function (addr) {
     var sh = this._sh, boxes = parseBoxes(addr);
     if (window.__noAreas) throw new Error("mock: RangeAreas off");
@@ -465,11 +466,14 @@
   window.Excel = {
     run: function (fn) { return Promise.resolve().then(function () { return fn(ctx); }); },
     WorksheetPositionType: { after: "After", end: "End", before: "Before", beginning: "Beginning" },
-    ConditionalFormatType: { custom: "Custom" }
+    ConditionalFormatType: { custom: "Custom" },
+    InsertShiftDirection: { down: "Down", right: "Right" }, DeleteShiftDirection: { up: "Up", left: "Left" }, RangeCopyType: { formats: "Formats", all: "All", values: "Values" }
   };
   window.Office = {
     HostType: { Excel: "Excel" },
-    context: { requirements: { isSetSupported: function (n, v) { return !(window.__noApi && window.__noApi[n + " " + v]); } } },
+    context: { requirements: { isSetSupported: function (n, v) { return !(window.__noApi && window.__noApi[n + " " + v]); } },
+      ui: { displayDialogAsync: function (url, opt, cb) { (window.__dialogs = window.__dialogs || []).push(url); cb({ status: "succeeded" }); }, openBrowserWindow: function (u) { (window.__opened = window.__opened || []).push(u); } } },
+    AsyncResultStatus: { Succeeded: "succeeded", Failed: "failed" },
     onReady: function (cb) { setTimeout(function () { cb({ host: "Excel" }); }, 0); }
   };
 })();

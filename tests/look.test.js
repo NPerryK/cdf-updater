@@ -1,8 +1,8 @@
 // Run: node tests/look.test.js — the look of sheet CDF (110.6 / 110.7) and the looks from ChatGPT / Claude
 const assert = require("assert");
 const L = require("../cdf-look.js");
-const A = require("../cdf-algo.js");
-const E = require("../engine.js");
+const A = require("../cdf-core.js");   // buildBlocks
+const E = require("../cdf-core.js");   // looseJson
 
 let passed = 0;
 function test(name, fn) {
