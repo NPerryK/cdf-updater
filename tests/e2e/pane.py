@@ -48,7 +48,13 @@ def rev_row(i, day, days):
     r = [""] * len(REVH); r[0], r[1], r[2], r[3], r[8], r[14], r[18], r[19] = "A330", str(1000 + i), "A", "INVENTED DOCUMENT %d" % i, day, days, "XD" if i % 2 else "DWG", "RELEASE NEW DOCUMENT"
     return r
 REV = [REVH] + [rev_row(i, TODAY - (i % 20), 10 + i % 9) for i in range(30)]
-SHEETS = [{"name": "CDF", "values": CDF, "merges": MERGES}, {"name": "GCC", "values": GCC}]
+REV[1][1] = "330-11-11-J0901"        # 901's first solution document: rev A released; its second (J0911) is in work
+E = ""
+SUMMARY = [["CDF STATUS", E, E, E, E], ["CDF STATUS", "CDF'S", E, E, E], ["Open", 3, E, E, E], ["Cancelled", 1, E, E, E], ["Released", 1, E, E, E], ["TOTAL", 5, E, E, E], [E] * 5,
+           ["WHERE ARE THE CDFS", E, E, "DANA PENDING TABLE", E], ["SUPPLIER", "CDF'S", E, "CDF NUMBER", "SOLUTION / DOCUMENT"], ["ANN/SIE", 1, E, "A330-1-901.-", "330-11-11-J0911 Rev A"], ["TIMAT", 1, E, "TOTAL", 1], ["TOTAL", 2, E, E, E], [E] * 5,
+           ["REJECTED", E, E, E, E], ["CDF NUMBER", "CDF STATUS", "DOCUMENT", "REVISION", "REJECTED BY"], ["A330-1-906.-", "Open", "330-66-00-J0906", "A", "TOM BAR"],
+           ["REJECTED CDFS", E, E, E, 1.0000000000000002]]
+SHEETS = [{"name": "CDF", "values": CDF, "merges": MERGES}, {"name": "GCC", "values": GCC}, {"name": "CDF SUMMARY", "values": SUMMARY}]
 NEW_GCC = [HEAD["gcc"]] + GCC[1:] + [gcc_row(908, "Open", "Initiator", TODAY)]
 
 def xlsx(path, sheet, rows):
@@ -89,7 +95,9 @@ with sync_playwright() as p:
     st = page.inner_text("[data-card=stations]")
     check("Conversion Engineer" in st and "Final Approval" in st, "stations: " + st.replace("\n", " ")[:120])
     check("SHEETS 2/3" in page.inner_text("#sheetsLamp"), "the lamp says MANTRAREV is missing: " + page.inner_text("#sheetsLamp"))
-    check("No MANTRAREV sheet yet" in page.inner_text("[data-card=docs]"), "the documents card says to import MANTRAREV")
+    check("No MANTRAREV sheet yet" in page.inner_text("[data-card=docs]"), "the solution documents card says to import MANTRAREV")
+    fs = page.evaluate("getComputedStyle(document.querySelector('#dash .kpi .kn')).fontSize")
+    check(fs == "21px", "the status card's numbers are smaller: " + fs)
     ag = page.inner_text("[data-card=aging]")
     check("902" in ag and "200 d" in ag, "oldest open: 902, 200 days")
     check("2 open with no engineering document" in page.inner_text("[data-card=attention]").replace("\n", " "), "902 (NO ENG. DOC.) and 906 (no document at Conversion Engineer) wait for an engineering document")
@@ -105,7 +113,7 @@ with sync_playwright() as p:
 
     print("\nPresent, PowerPoint, Copy")
     page.click("#dashPresent")
-    check(page.evaluate("(window.__dialogs || []).some(u => /present\\.html\\?v=2\\.0\\.0$/.test(u))"), "Present opens present.html in an Office dialog")
+    check(page.evaluate("(window.__dialogs || []).some(u => /present\\.html\\?v=2\\.1\\.0$/.test(u))"), "Present opens present.html in an Office dialog")
     handed = page.evaluate("JSON.parse(localStorage.getItem('cdfUpdater.present.v2')).model.status.open")
     check(handed == 3, "the model is handed to the present view")
     with page.expect_download(timeout=30000) as dl: page.click("#dashDeck")
@@ -138,7 +146,25 @@ with sync_playwright() as p:
     page.click("#tab-status"); page.wait_for_timeout(300)
     check("SHEETS 3/3" in page.inner_text("#sheetsLamp"), "all three sheets there now")
     dc = page.inner_text("[data-card=docs]")
-    check("last 7 days" in dc and "days to release" in dc, "documents released: " + dc.replace("\n", " ")[:120])
+    check(re.search(r"1\s*revisions released", dc) and re.search(r"1\s*revisions in work", dc), "solution documents of the open CDFs: 1 released, 1 in work: " + dc.replace("\n", " ")[:140])
+    check("330-11-11-J0911" in dc and "no revision released" in dc, "the one in work is listed: J0911, no revision released yet")
+
+    print("\nSUMMARY — sheet CDF SUMMARY as cards")
+    page.click("#tab-summary"); page.wait_for_selector("#sumView .dcard.sv", timeout=20000)
+    titles = page.eval_on_selector_all("#sumView .dcard.sv h3", "e => e.map(x => x.textContent)")
+    check(titles == ["CDF STATUS", "WHERE ARE THE CDFS", "DANA PENDING TABLE", "REJECTED"], "every table is a card, side by side ones too: " + str(titles))
+    check("4 tables" in page.inner_text("#sumMeta"), "the meta line counts the tables: " + page.inner_text("#sumMeta"))
+    check("REJECTED CDFS 1" in page.inner_text("#sv-t3").replace("\n", " "), "summary lines rounded (1.0000000000000002 → 1)")
+    check("column R" in page.inner_text("#sv-t0") and "column P" in page.inner_text("#sv-t1"), "the counts are linked to their columns in sheet CDF")
+    page.click("#sv-t0 .sv-c.tap >> nth=0"); page.wait_for_selector("#list:not(.hidden)")
+    check(page.inner_text("#listCount") == "3 CDFs", "a click on Open lists its 3 CDFs: " + page.inner_text("#listCount"))
+    page.click("#listClose")
+    page.click("#sv-t2 .sv-key"); page.wait_for_timeout(200)
+    check(page.evaluate("window.__wb.active") == "CDF", "a CDF number in a table goes to its row")
+    page.fill("#sumFilter", "tom bar"); page.wait_for_timeout(100)
+    vis = page.eval_on_selector_all("#sumView .dcard.sv", "e => e.filter(x => x.offsetParent !== null).map(x => x.querySelector('h3').textContent)")
+    check(vis == ["REJECTED"], "the filter leaves only what holds the text: " + str(vis))
+    page.fill("#sumFilter", "")
 
     print("\nROWS — TSV, each row where you say")
     page.click("#tab-rows")

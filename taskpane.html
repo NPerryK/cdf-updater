@@ -5,17 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CDF Updater</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-  <script src="lib/jszip.min.js?v=2.0.0"></script>
-  <script src="cdf-core.js?v=2.0.0"></script>
-  <script src="cdf-link.js?v=2.0.0"></script>
-  <script src="cdf-stats.js?v=2.0.0"></script>
-  <script src="cdf-charts.js?v=2.0.0"></script>
-  <script src="cdf-dash.js?v=2.0.0"></script>
-  <script src="cdf-rows.js?v=2.0.0"></script>
-  <script src="cdf-notes.js?v=2.0.0"></script>
-  <script src="cdf-look.js?v=2.0.0"></script>
-  <script src="cdf-deck.js?v=2.0.0"></script>
-  <link rel="stylesheet" href="taskpane.css?v=2.0.0">
+  <script src="lib/jszip.min.js?v=2.1.0"></script>
+  <script src="cdf-core.js?v=2.1.0"></script>
+  <script src="cdf-link.js?v=2.1.0"></script>
+  <script src="cdf-stats.js?v=2.1.0"></script>
+  <script src="cdf-charts.js?v=2.1.0"></script>
+  <script src="cdf-dash.js?v=2.1.0"></script>
+  <script src="cdf-rows.js?v=2.1.0"></script>
+  <script src="cdf-notes.js?v=2.1.0"></script>
+  <script src="cdf-look.js?v=2.1.0"></script>
+  <script src="cdf-deck.js?v=2.1.0"></script>
+  <script src="cdf-summary.js?v=2.1.0"></script>
+  <link rel="stylesheet" href="taskpane.css?v=2.1.0">
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -43,7 +44,7 @@
         <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg>
       </span>
       <div class="brand">
-        <h1>CDF Updater <span id="appVersion" class="ver" title="Add-in version">v2.0.0</span></h1>
+        <h1>CDF Updater <span id="appVersion" class="ver" title="Add-in version">v2.1.0</span></h1>
         <p>A330-300 P2F deviation tracker</p>
       </div>
       <button id="lookupOpen" class="deck-btn" type="button" title="Find a CDF (Ctrl+F)" aria-label="Find a CDF"><svg class="ico"><use href="#i-find"/></svg></button>
@@ -61,6 +62,7 @@
   <!-- ===== ECAM control panel: pages ===== -->
   <nav class="ecp" role="tablist" aria-label="Pages">
     <button class="key on" id="tab-status" role="tab" aria-selected="true" aria-controls="page-status" data-page="status" type="button"><span class="key-light"></span>STATUS</button>
+    <button class="key" id="tab-summary" role="tab" tabindex="-1" aria-selected="false" aria-controls="page-summary" data-page="summary" type="button"><span class="key-light"></span>SUMMARY</button>
     <button class="key" id="tab-import" role="tab" tabindex="-1" aria-selected="false" aria-controls="page-import" data-page="import" type="button"><span class="key-light"></span>IMPORT</button>
     <button class="key" id="tab-rows" role="tab" tabindex="-1" aria-selected="false" aria-controls="page-rows" data-page="rows" type="button"><span class="key-light"></span>ROWS</button>
     <button class="key" id="tab-look" role="tab" tabindex="-1" aria-selected="false" aria-controls="page-look" data-page="look" type="button"><span class="key-light"></span>LOOK</button>
@@ -80,6 +82,16 @@
       </div>
       <div id="dashMsg" class="msg dash-msg"></div>
       <div id="dash" class="dash"><div class="dempty">Reading the workbook…</div></div>
+    </section>
+
+    <!-- ================= SUMMARY ================= -->
+    <section class="page" id="page-summary" role="tabpanel" aria-labelledby="tab-summary">
+      <div class="sv-bar">
+        <button id="sumRefresh" class="btn small" type="button" title="Read sheet CDF SUMMARY again"><svg class="ico"><use href="#i-refresh"/></svg>Refresh</button>
+        <label class="sv-find"><svg class="ico"><use href="#i-find"/></svg><input id="sumFilter" type="search" placeholder="Filter — a name, a CDF, a document" spellcheck="false" autocomplete="off"></label>
+      </div>
+      <div id="sumMeta" class="sv-meta"></div>
+      <div id="sumView" class="dash"><div class="dempty">Open this page inside Excel to see sheet CDF SUMMARY.</div></div>
     </section>
 
     <!-- ================= IMPORT ================= -->
@@ -245,6 +257,6 @@
     <div id="status" class="ab-status hidden" role="status"><span class="spinner"></span><span id="statusText"></span></div>
   </footer>
 
-  <script src="taskpane.js?v=2.0.0"></script>
+  <script src="taskpane.js?v=2.1.0"></script>
 </body>
 </html>

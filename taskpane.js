@@ -3,7 +3,7 @@
 (function () {
   "use strict";
 
-  var K = window.CdfCore, S = window.CdfStats, G = window.CdfCharts, D = window.CdfDash, R = window.CdfRows, N = window.CdfNotes, L = window.CdfLink;
+  var K = window.CdfCore, S = window.CdfStats, G = window.CdfCharts, D = window.CdfDash, R = window.CdfRows, N = window.CdfNotes, L = window.CdfLink, V = window.CdfSummary;
   var READ_BUDGET = 150000;
   var LS_RULES = "cdfUpdater.localRules.v2", THEME_KEY = "cdfUpdater.theme.v1", PRESENT_KEY = "cdfUpdater.present.v2";
   var NS_LOOKS = "urn:cdf-updater:looks:v1", NS_TREND = "urn:cdf-updater:trend:v2", NS_STATIONS = "urn:cdf-updater:stations:v1", NS_NOTES = "urn:cdf-updater:mynotes:v1";
@@ -15,7 +15,8 @@
     files: [], importDone: {},                 // [{ file, target, sheet, rows, why }]
     rowsItems: null, rowsLayout: null, rowsUndo: null,
     looks: [], lookValues: null, lookCols: null, lookDraft: null,
-    myNotes: null, notesPlan: null, statusPack: null
+    myNotes: null, notesPlan: null, statusPack: null,
+    sum: null, sumLists: {}, sumAt: 0
   };
   var $ = function (id) { return document.getElementById(id); };
 
@@ -54,6 +55,11 @@
     $("dash").addEventListener("click", onDashClick);
     $("dash").addEventListener("keydown", function (ev) { if (ev.key === "Enter" || ev.key === " ") onDashClick(ev); });
     $("glance").addEventListener("click", onDashClick);
+    // SUMMARY
+    $("sumRefresh").addEventListener("click", function () { refreshSummary(true); });
+    $("sumFilter").addEventListener("input", filterSummary);
+    $("sumView").addEventListener("click", onSumClick);
+    $("sumView").addEventListener("keydown", function (ev) { if (ev.key === "Enter" || ev.key === " ") onSumClick(ev); });
     // IMPORT
     var drop = $("drop"), input = $("dropInput");
     input.addEventListener("change", function () { takeFiles(input.files); input.value = ""; });
@@ -278,9 +284,9 @@
   }
   function renderSheetsLamp() {
     var d = state.data || {}, have = ["cdf", "gcc", "rev"].filter(function (k) { return d[k] && d[k].length > 1; }).length, m = state.model;
-    var old = m && m.docs && m.docs.staleDays > 7;
+    var age = m && m.docs && m.docs.latest != null ? m.today - m.docs.latest : 0, old = age > 7;
     setLamp("sheetsLamp", have === 3 ? (old ? "REV OLD" : "SHEETS 3/3") : "SHEETS " + have + "/3", have === 3 && !old ? "ok" : have ? "warn" : "bad",
-      ["CDF", "GCC", "MANTRAREV"].map(function (n, i) { return n + ": " + (d[["cdf", "gcc", "rev"][i]] && d[["cdf", "gcc", "rev"][i]].length > 1 ? "there" : "missing"); }).join(" · ") + (old ? " · MANTRAREV is " + m.docs.staleDays + " days old" : ""));
+      ["CDF", "GCC", "MANTRAREV"].map(function (n, i) { return n + ": " + (d[["cdf", "gcc", "rev"][i]] && d[["cdf", "gcc", "rev"][i]].length > 1 ? "there" : "missing"); }).join(" · ") + (old ? " · the newest release in MANTRAREV is " + age + " days old" : ""));
   }
   function onDashClick(ev) {
     var t = ev.target.closest ? ev.target.closest("[data-list],[data-key]") : null;
@@ -937,6 +943,57 @@
   }
   function stamp() { var d = new Date(); return K.ddmmyyyy(K.serialOf(d)) + " " + hhmm(d); }
 
+  // ================= SUMMARY: sheet CDF SUMMARY as cards =================
+  var SUMMARY_SHEET = "CDF SUMMARY";
+  function refreshSummary(manual) {
+    if (!state.inExcel) return Promise.resolve();
+    $("sumMeta").textContent = "Reading sheet " + SUMMARY_SHEET + "…";
+    return Excel.run(function (ctx) {
+      return readSheets(ctx, [SUMMARY_SHEET]).then(function (rd) { return rd.sheets[SUMMARY_SHEET]; });
+    }).then(function (sh) {
+      return (state.data && state.data.cdf ? Promise.resolve(state.data) : readAll()).then(function (d) {
+        state.sumAt = Date.now();
+        if (!sh) { state.sum = null; $("sumMeta").textContent = ""; $("sumView").innerHTML = '<div class="dempty"><b>This workbook has no sheet ' + esc(SUMMARY_SHEET) + ".</b> The algorithm writes it; once it's there, refresh.</div>"; return; }
+        state.sum = V.parse(sh.values);
+        renderSummary(d);
+        if (manual) $("sumMeta").insertAdjacentHTML("beforeend", " · read " + esc(hhmm(new Date())));
+      });
+    }).catch(function (e) { $("sumMeta").textContent = ""; $("sumView").innerHTML = '<div class="note bad">' + esc(errText(e)) + "</div>"; });
+  }
+  function renderSummary(d) {
+    var p = state.sum, r = state.rules || K.parseRules(""), out = V.render(p, { cdf: d && d.cdf, exclude: r.exclude });
+    state.sumLists = out.lists;
+    var n = p ? p.tables.length : 0;
+    $("sumMeta").innerHTML = n ? "<b>" + n + "</b> tables in sheet " + esc(SUMMARY_SHEET) + (p.asOf ? " · as of <b>" + esc(p.asOf) + "</b>" : "") : "";
+    $("sumView").innerHTML = out.html;
+    $("sumView").classList.add("sv-view");
+    filterSummary();
+  }
+  function onSumClick(ev) {
+    var t = ev.target.closest ? ev.target.closest("[data-key],[data-list],[data-goto],[data-all]") : null;
+    if (!t) return;
+    ev.preventDefault();
+    if (t.getAttribute("data-key")) { selectCdf(t.getAttribute("data-key")); return; }
+    if (t.getAttribute("data-goto")) { var c = $("sv-" + t.getAttribute("data-goto")); if (c) c.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+    if (t.getAttribute("data-all")) { var a = $("sv-" + t.getAttribute("data-all")); if (a) a.classList.add("all"); return; }
+    var l = state.sumLists[t.getAttribute("data-list")];
+    if (l) openList(l.title, l.keys);
+  }
+  // the filter: rows that hold the text stay, cards with none go
+  function filterSummary() {
+    var q = K.trim($("sumFilter").value).toLowerCase(), view = $("sumView");
+    view.classList.toggle("filtering", !!q);
+    Array.prototype.forEach.call(view.querySelectorAll(".dcard.sv"), function (card) {
+      var any = false;
+      Array.prototype.forEach.call(card.querySelectorAll("[data-text]"), function (x) {
+        var hit = !q || x.getAttribute("data-text").indexOf(q) >= 0;
+        x.classList.toggle("hit-no", !hit); if (hit) any = true;
+      });
+      card.classList.toggle("hit-none", !!q && !any && card.querySelector(".dhead h3").textContent.toLowerCase().indexOf(q) < 0);
+      if (q && !any && !card.classList.contains("hit-none")) Array.prototype.forEach.call(card.querySelectorAll(".hit-no"), function (x) { x.classList.remove("hit-no"); });
+    });
+  }
+
   // ================= find a CDF =================
   function openLookup() { $("lookup").classList.remove("hidden"); var i = $("lookupInput"); i.value = ""; i.focus(); }
   function closeLookup() { $("lookup").classList.add("hidden"); }
@@ -944,13 +1001,19 @@
     var p = K.parseQuery(q), box = $("lookupResult");
     if (!p) { box.innerHTML = '<p class="hint">Type a CDF number: 856, 740.A or A330-1-856.A</p>'; return; }
     (state.data ? Promise.resolve(state.data) : readAll()).then(function (d) {
-      var cdf = d.cdf || [], gi = S.gccIndex(d.gcc), hits = K.buildBlocks(cdf).filter(function (b) { var k = K.keyParts(b.key); return k && k.num === p.num && (!p.rev || k.rev === p.rev); });
+      var cdf = d.cdf || [], gi = S.gccIndex(d.gcc), ri = S.revIndex(d.rev), hits = K.buildBlocks(cdf).filter(function (b) { var k = K.keyParts(b.key); return k && k.num === p.num && (!p.rev || k.rev === p.rev); });
       if (!hits.length) { box.innerHTML = '<p class="hint">No CDF ' + esc(q) + " in sheet CDF.</p>"; return; }
       var C = function (L) { return K.col(L); };
       box.innerHTML = hits.map(function (b) {
         var a = cdf[b.anchor] || [], g = gi[K.keyBase(b.key)] || {}, h = cdf[0] || [];
         var f = function (L) { var v = a[C(L)]; return typeof v === "number" && (L === "F" || L === "Q") ? K.ddmmyyyy(v) : K.trim(v); };
-        var docs = b.rows.map(function (r) { var x = cdf[r] || []; return K.trim(x[C("AA")]) ? "<li>" + esc(K.trim(x[C("AA")]) + (K.trim(x[C("AB")]) ? " rev " + K.trim(x[C("AB")]) : "")) + ' <span class="dim">' + esc(K.trim(x[C("U")])) + "</span></li>" : ""; }).join("");
+        var docs = b.rows.map(function (r) {
+          var x = cdf[r] || [], doc = K.trim(x[C("AA")]);
+          if (!doc) return "";
+          var real = doc !== "-" && !/answer at gcc|no eng/i.test(doc), ds = real && ri && !ri.error ? S.docState(ri, doc, x[C("AB")]) : null;
+          var tag = ds ? (ds.state === "released" ? '<span class="lk-rs rel">released</span>' : '<span class="lk-rs work">in work' + (ds.released ? " · rev " + esc(ds.released) + " released" : "") + "</span>") : "";
+          return "<li>" + esc(doc + (K.trim(x[C("AB")]) ? " rev " + K.trim(x[C("AB")]) : "")) + " " + tag + ' <span class="dim">' + esc(K.trim(x[C("U")])) + "</span></li>";
+        }).join("");
         var notes = L && state.myNotes ? L.notesFor(b.key, state.myNotes.notes) : [];
         return '<div class="lk-card"><div class="lk-top"><b>' + esc(b.key) + '</b><span class="lk-st">' + esc(f("R")) + "</span></div>" +
           '<div class="lk-grid">' + [["Station", f("S")], ["Signature", f("T")], ["Supplier", f("P")], ["Received", f("F")], ["Closed", f("Q")], ["GCC open", g.open != null ? K.ddmmyyyy(g.open) : ""], ["Priority", f("G")], ["DWG", f("J")]]
@@ -1044,6 +1107,7 @@
     Array.prototype.forEach.call(document.querySelectorAll("main > .page"), function (p) { p.classList.toggle("on", p.id === "page-" + name); });
     if (name === "look") { renderLookPage(); if (state.inExcel && (state.looks || []).length && !state.lookValues) lookValues().then(renderLookPage); }
     if (name === "import") renderSlots();
+    if (name === "summary" && state.inExcel && Date.now() - state.sumAt > 60000) refreshSummary();
     if (name === "status" && state.inExcel && Date.now() - state.readAt > 60000) refreshDash();
     try { window.scrollTo(0, 0); } catch (e) { /* ignore */ }
   }

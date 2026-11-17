@@ -7,11 +7,11 @@ const C = K.col, T = 46335, NOW = new Date(2026, 10, 9, 10, 0);     // Mon 09/11
 function row(o) { const r = new Array(34).fill(""); for (const [k, v] of Object.entries(o)) r[C(k)] = v; return r; }
 const CDF = [new Array(34).fill("h"),
   row({ C: "A330-1-001.-", R: "Open", S: "3 - Conversion Engineer", P: "ANN", F: T - 10, U: "NO ENG. DOC." }),
-  row({ C: "A330-1-002.-", R: "Open", S: "9 - Final Approval", P: "TIMAT", F: T - 100, AA: "D2" }),
-  row({ R: "Open", AA: "D2b" }),
-  row({ C: "A330-1-003.-", R: "Released", S: "Released", F: T - 50, Q: T - 2 }),
+  row({ C: "A330-1-002.-", R: "Open", S: "9 - Final Approval", P: "TIMAT", F: T - 100, AA: "2", AB: "B" }),
+  row({ R: "Open", AA: "3", AB: "B" }),
+  row({ C: "A330-1-003.-", R: "Released", S: "Released", F: T - 50, Q: T - 2, AA: "1", AB: "A" }),
   row({ C: "A330-1-004.-", R: "Cancelled", F: T - 60 }),
-  row({ C: "A330-1-005.-", R: "Open", S: "1 - Initiator", P: "-", F: T - 1 }),
+  row({ C: "A330-1-005.-", R: "Open", S: "1 - Initiator", P: "-", F: T - 1, AA: "NEW-9", AB: "-" }),
   row({ C: "A330-1-052 (another)", R: "Released" })];
 const GCCH = ["CDF Number", "CDF Status", "Open Date", "Close Date", "Current Station"];
 const GCC = [GCCH, ["A330-1-001.-", "Open", T - 12, "", "Conversion ENG"], ["A330-1-002.-", "Open", T - 200, "", "Final Approval"], ["A330-1-003.-", "Released", T - 55, T - 2, "Released"], ["A330-1-009.-", "Released", T - 9, T - 8, "Released"]];
@@ -30,8 +30,8 @@ test("build", "released this week from the closed date", () => assert.deepStrict
 test("build", "opened in the last 7 days", () => assert.deepStrictEqual(M.week.openedKeys, ["A330-1-005.-"]));
 test("build", "waiting for an engineering document", () => assert.deepStrictEqual(M.noDoc.keys, ["A330-1-001.-"]));
 test("build", "not in GCC", () => assert.deepStrictEqual(M.notInGcc, ["A330-1-005.-"]));
-test("build", "freshness of GCC and MANTRAREV", () => { assert.strictEqual(M.fresh.gcc, T - 2); assert.strictEqual(M.docs.latest, T - 1); assert.strictEqual(M.docs.staleDays, 1); });
-test("build", "no CDF sheet → empty", () => { const e = S.build({ cdf: null, gcc: GCC, rev: REV }, { now: NOW }); assert.ok(e.empty); assert.ok(e.docs); });
+test("build", "freshness of GCC and MANTRAREV", () => { assert.strictEqual(M.fresh.gcc, T - 2); assert.strictEqual(M.docs.latest, T - 1); assert.strictEqual(M.fresh.rev, T - 1); });
+test("build", "no CDF sheet → empty", () => { const e = S.build({ cdf: null, gcc: GCC, rev: REV }, { now: NOW }); assert.ok(e.empty); assert.ok(!e.status); });
 test("build", "weekly: 12 weeks, this week last", () => { assert.strictEqual(M.weekly.length, 12); assert.strictEqual(M.weekly[11].week, K.weekStart(T)); });
 test("build", "trend: stored days + today", () => { const m = S.build({ cdf: CDF }, { now: NOW, history: [{ d: T - 1, open: 9, released: 1 }, { d: T, open: 99, released: 0 }] }); assert.deepStrictEqual(m.trend.map((t) => t.open), [9, 3]); });
 test("cdfsOf", "one per anchor", () => assert.strictEqual(S.cdfsOf(CDF).length, 6));
@@ -44,11 +44,22 @@ test("gccIndex", "close and status", () => assert.deepStrictEqual(S.gccIndex(GCC
 test("gccIndex", "latest date seen", () => assert.strictEqual(S.gccIndex(GCC).latest, T - 2));
 test("gccIndex", "no CDF Number column", () => assert.deepStrictEqual(S.gccIndex([["x"], ["y"]]), {}));
 test("gccIndex", "empty", () => assert.deepStrictEqual(S.gccIndex(null), {}));
-test("docsOf", "last 7 / 30 days", () => { const d = S.docsOf(REV, T); assert.deepStrictEqual([d.last7.length, d.last30], [2, 3]); });
-test("docsOf", "median days to release (30 days)", () => assert.strictEqual(S.docsOf(REV, T).medianDays, 20));
-test("docsOf", "types", () => assert.deepStrictEqual(S.docsOf(REV, T).types, [{ name: "XD", n: 2 }, { name: "DWG", n: 1 }]));
-test("docsOf", "no header → error", () => assert.ok(S.docsOf([["a", "b"], [1, 2]], T).error));
-test("docsOf", "no sheet → null", () => assert.strictEqual(S.docsOf(null, T), null));
+const RI = S.revIndex(REV);
+test("revIndex", "documents and their released revisions", () => assert.deepStrictEqual(Object.keys(RI.ids).sort(), ["1", "2", "3", "4"]));
+test("revIndex", "the newest release date", () => assert.strictEqual(RI.latest, T - 1));
+test("revIndex", "upper case, blank rev is -", () => { const x = S.revIndex([["Doc ID", "Rev", "Release Date"], ["ab-1 ", "", T], ["AB-1", "a", T]]); assert.deepStrictEqual(Object.keys(x.ids["AB-1"]).sort(), ["-", "A"]); });
+test("revIndex", "no header → error", () => assert.ok(S.revIndex([["a", "b"], [1, 2]]).error));
+test("revIndex", "no sheet → null", () => assert.strictEqual(S.revIndex(null), null));
+test("docState", "the revision is in MANTRAREV → released", () => assert.deepStrictEqual(S.docState(RI, "2", "B"), { state: "released", released: "B" }));
+test("docState", "another revision released → in work, says which", () => assert.deepStrictEqual(S.docState(RI, "3", "B"), { state: "work", released: "A" }));
+test("docState", "not in MANTRAREV → in work, nothing released", () => assert.deepStrictEqual(S.docState(RI, "X-1", "-"), { state: "work", released: "" }));
+test("docState", "case and spaces", () => assert.strictEqual(S.docState(RI, " 2 ", "b").state, "released"));
+test("docState", "the newest released revision", () => { const x = S.revIndex([["Doc ID", "Rev", "Release Date"], ["D", "-", T], ["D", "C", T], ["D", "A", T]]); assert.strictEqual(S.docState(x, "D", "E").released, "C"); });
+test("docsOf", "released and in work, open CDFs only", () => assert.deepStrictEqual([M.docs.released.map((d) => d.doc), M.docs.work.map((d) => d.doc)], [["2"], ["3", "NEW-9"]]));
+test("docsOf", "the CDFs behind each", () => assert.deepStrictEqual([M.docs.keys.released, M.docs.keys.work], [["A330-1-002.-"], ["A330-1-002.-", "A330-1-005.-"]]));
+test("docsOf", "no-document markers skipped", () => assert.ok(!M.docs.work.concat(M.docs.released).some((d) => /^-$|ANSWER|NO ENG/i.test(d.doc))));
+test("docsOf", "a document shared by two CDFs counts once", () => { const c = CDF.concat([row({ C: "A330-1-007.-", R: "Open", AA: "3", AB: "b" })]); const m = S.build({ cdf: c, rev: REV }, { now: NOW }); assert.deepStrictEqual(m.docs.work.find((d) => d.doc === "3").keys, ["A330-1-002.-", "A330-1-007.-"]); });
+test("docsOf", "no MANTRAREV → null", () => assert.strictEqual(S.build({ cdf: CDF }, { now: NOW }).docs, null));
 test("weekList", "12 Sundays, last is this week", () => { const w = S.weekList(T); assert.strictEqual(w.length, 12); assert.strictEqual(w[11], 46334); assert.strictEqual(w[0], 46334 - 77); });
 test("weekList", "a custom count", () => assert.strictEqual(S.weekList(T, 4).length, 4));
 test("weekList", "7 days apart", () => { const w = S.weekList(T); for (let i = 1; i < w.length; i++) assert.strictEqual(w[i] - w[i - 1], 7); });
@@ -101,6 +112,7 @@ test("ring", "0%", () => assert.ok(/stroke-dasharray="0 /.test(G.ring(0))));
 test("ring", "over 100 is full", () => { const s = G.ring(130), m = /stroke-dasharray="([\d.]+) ([\d.]+)"/.exec(s); assert.strictEqual(m[1], m[2]); });
 test("ring", "size", () => assert.ok(G.ring(5, { size: 50 }).indexOf('width="50"') > 0));
 test("ring", "label", () => assert.ok(G.ring(5, { label: "released" }).indexOf(">released<") > 0));
+test("ring", "a small ring keeps only the %", () => assert.ok(G.ring(5, { label: "released", size: 62 }).indexOf("released<") < 0));
 test("strip", "one part per status", () => assert.strictEqual((G.strip([{ n: 1, cls: "a", label: "A" }, { n: 3, cls: "b", label: "B" }]).match(/<rect/g) || []).length, 2));
 test("strip", "widths add up", () => { const s = G.strip([{ n: 1, cls: "a", label: "A" }, { n: 3, cls: "b", label: "B" }], { width: 100 }); assert.ok(s.indexOf('width="25"') > 0 && s.indexOf('width="75"') > 0); });
 test("strip", "all zero", () => assert.ok(G.strip([{ n: 0, cls: "a", label: "A" }]).indexOf("<svg") === 0));
@@ -118,6 +130,7 @@ test("render", "the cards", () => assert.deepStrictEqual(R0.cards.map((c) => c.i
 test("render", "every data-list has its list", () => { (R0.html.match(/data-list="([^"]+)"/g) || []).forEach((m) => { const id = m.slice(11, -1).replace(/&amp;/g, "&"); assert.ok(R0.lists[id], id); }); });
 test("render", "the lists carry the keys", () => assert.deepStrictEqual(R0.lists["status:open"].keys, ["A330-1-001.-", "A330-1-002.-", "A330-1-005.-"]));
 test("render", "empty model", () => assert.ok(D.render({ empty: true }).html.indexOf("No CDF sheet") > 0));
+test("render", "solution documents card", () => assert.ok(/revisions in work/.test(R0.html) && R0.lists["doc:work"].keys.length === 2));
 test("render", "present mode draws wider charts", () => assert.ok(D.render(M, { mode: "present" }).html.indexOf('viewBox="0 0 520') > 0));
 test("paceText", "growing", () => assert.ok(/grows by about/.test(D.paceText({ pace: { weeks: 8, closed: 2, opened: 5, net: -3 }, status: { open: 10 } }))));
 test("paceText", "a date when they run out", () => assert.ok(/around 21\/12\/2026/.test(D.paceText({ pace: { weeks: 8, closed: 5, opened: 2, net: 3, weeksToZero: 6, zeroOn: T + 42 }, status: { open: 18 } }))));

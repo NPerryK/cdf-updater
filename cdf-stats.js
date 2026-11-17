@@ -8,7 +8,7 @@
  *   aging         days since each open CDF was opened (GCC Open Date, else CDF received date), in buckets
  *   weekly        CDFs opened and closed in each of the last weeks (GCC Open / Close Date, else CDF F / Q)
  *   pace          closed and opened per week over the last 8 weeks, and when the open ones run out at that pace
- *   docs          MANTRAREV: documents released per week, in the last 7 / 30 days, days to release, by type
+ *   docs          the solution documents of the open CDFs: released (in MANTRAREV) or in work
  *   trend         the open count over time, from snapshots the pane keeps in the workbook (one a day)
  * Every count keeps the CDF numbers behind it (keys) so the pane can list them.
  */
@@ -18,7 +18,7 @@
 })(typeof self !== "undefined" ? self : this, function (K) {
   "use strict";
 
-  var C = { C: K.col("C"), E: K.col("E"), F: K.col("F"), P: K.col("P"), Q: K.col("Q"), R: K.col("R"), S: K.col("S"), U: K.col("U"), AA: K.col("AA") };
+  var C = { C: K.col("C"), E: K.col("E"), F: K.col("F"), P: K.col("P"), Q: K.col("Q"), R: K.col("R"), S: K.col("S"), U: K.col("U"), AA: K.col("AA"), AB: K.col("AB") };
   var AGE_BUCKETS = [[0, 7, "≤ 7 d"], [8, 30, "8–30 d"], [31, 90, "1–3 mo"], [91, 180, "3–6 mo"], [181, 1e9, "> 6 mo"]];
   var SUPPLIERS = { "ANN/SIE": "ANN/SIE", "SIE/ANN": "ANN/SIE", "ANN": "ANN/SIE", "SIE": "ANN/SIE", "ANCRA": "ANCARA", "ANCARA": "ANCARA", "TIMAT": "TIMAT", "IAI": "IAI" };
   var WEEKS = 12, PACE_WEEKS = 8;
@@ -38,7 +38,7 @@
     return K.buildBlocks(cdf || []).map(function (b) {
       var row = cdf[b.anchor] || [], docs = b.rows.map(function (r) { return K.trim((cdf[r] || [])[C.AA]); }).filter(function (x) { return x && x !== "-"; });
       return { key: b.key, row: b.anchor + 1, status: statusOf(row[C.R]), station: K.trim(row[C.S]) || "-", supplier: supplierOf(row[C.P]),
-        received: K.daySerial(row[C.F]), closed: K.daySerial(row[C.Q]), mantra: K.trim(row[C.U]), docs: docs.length, notes: K.trim(row[C.E]) };
+        received: K.daySerial(row[C.F]), closed: K.daySerial(row[C.Q]), mantra: K.trim(row[C.U]), docs: docs.length, notes: K.trim(row[C.E]), blockRows: b.rows };
     });
   }
   // GCC: key base → { open, close, status } (the dates the CDF system keeps)
@@ -57,40 +57,55 @@
     return out;
   }
 
-  // MANTRAREV: released documents (one row per document revision) → per week, last 7 / 30 days, days to release, types
-  function docsOf(rev, today) {
+  // MANTRAREV: the released document revisions (one row per document revision). It only tells released from in work:
+  // revIndex → { ids: { DOC: { REV: day } }, latest, rows }   (ids and revisions in upper case)
+  function revIndex(rev) {
     if (!rev || !rev.length) return null;
     var hr = K.headerRow(rev, ["Doc ID", "Release Date"]);
     if (hr < 0) return { error: "MANTRAREV has no \"Doc ID\" and \"Release Date\" columns" };
-    var h = rev[hr], iD = K.columnIndex(h, "Release Date"), iId = K.columnIndex(h, "Doc ID"), iRev = K.columnIndex(h, "Rev"), iT = K.columnIndex(h, "Doc Type"),
-      iDays = K.columnIndex(h, "Days Cal"), iTitle = K.columnIndex(h, "Doc Title"), iA = K.columnIndex(h, "EO Action");
-    var weeks = weekList(today), byWeek = {}, last7 = [], last30 = [], days30 = [], types = {}, total = 0, latest = null;
-    weeks.forEach(function (w) { byWeek[w] = 0; });
+    var h = rev[hr], iId = K.columnIndex(h, "Doc ID"), iRev = K.columnIndex(h, "Rev"), iD = K.columnIndex(h, "Release Date");
+    var ids = {}, latest = null, n = 0;
     for (var r = hr + 1; r < rev.length; r++) {
-      var row = rev[r] || [], d = K.daySerial(row[iD]);
-      if (d == null) continue;
-      total++;
-      if (latest == null || d > latest) latest = d;
-      var w = K.weekStart(d), age = today - d;
-      if (byWeek[w] != null) byWeek[w]++;
-      var doc = { id: K.trim(row[iId]), rev: iRev < 0 ? "" : K.trim(row[iRev]), title: iTitle < 0 ? "" : K.trim(row[iTitle]), day: d, action: iA < 0 ? "" : K.trim(row[iA]) };
-      if (age >= 0 && age < 7) last7.push(doc);
-      if (age >= 0 && age < 30) {
-        last30.push(doc);
-        var dc = iDays < 0 ? NaN : Number(row[iDays]);
-        if (isFinite(dc) && dc >= 0) days30.push(dc);
-        var t = iT < 0 ? "" : K.trim(row[iT]) || "—";
-        types[t] = (types[t] || 0) + 1;
-      }
+      var row = rev[r] || [], id = K.trim(row[iId]).toUpperCase();
+      if (!id) continue;
+      var d = K.daySerial(row[iD]), rv = revOf(iRev < 0 ? "" : row[iRev]);
+      (ids[id] = ids[id] || {})[rv] = d;
+      n++;
+      if (d != null && (latest == null || d > latest)) latest = d;
     }
-    days30.sort(function (a, b) { return a - b; });
-    return {
-      total: total, latest: latest, staleDays: latest == null ? null : today - latest, weekly: weeks.map(function (w) { return { week: w, n: byWeek[w] }; }),
-      last7: last7.sort(byDayDesc), last30: last30.length, medianDays: days30.length ? median(days30) : null,
-      types: Object.keys(types).map(function (k) { return { name: k, n: types[k] }; }).sort(function (a, b) { return b.n - a.n; }).slice(0, 6)
-    };
+    return { ids: ids, latest: latest, rows: n };
   }
-  function byDayDesc(a, b) { return b.day - a.day; }
+  function revOf(v) { var s = K.trim(v).toUpperCase(); return s === "" ? "-" : s; }
+  function revRank(r) { return r === "-" ? 0 : r.length === 1 ? r.charCodeAt(0) - 63 : 100 + r.length; }
+  // one solution document of a CDF against MANTRAREV → { state: "released" | "work", released: newest released rev or "" }
+  function docState(index, doc, rev) {
+    var id = K.trim(doc).toUpperCase(), rv = revOf(rev), revs = index && index.ids ? index.ids[id] : null;
+    if (revs && Object.prototype.hasOwnProperty.call(revs, rv)) return { state: "released", released: rv };
+    var top = revs ? Object.keys(revs).sort(function (a, b) { return revRank(b) - revRank(a); })[0] : "";
+    return { state: "work", released: top || "" };
+  }
+  function isDoc(v) { var s = K.trim(v); return !!s && s !== "-" && !/answer at gcc|no eng/i.test(s); }
+  // the solution documents (AA + AB) of the open CDFs → released / in work, with the CDFs behind each
+  function docsOf(cdf, open, index) {
+    if (!index || index.error) return index;
+    var out = { latest: index.latest, rows: index.rows, released: [], work: [], keys: { released: [], work: [] } }, seen = {};
+    open.forEach(function (x) {
+      x.blockRows.forEach(function (r) {
+        var row = cdf[r] || [], doc = row[C.AA];
+        if (!isDoc(doc)) return;
+        var rv = revOf(row[C.AB]), id = K.trim(doc), tag = id.toUpperCase() + "|" + rv;
+        if (seen[tag]) { if (seen[tag].keys.indexOf(x.key) < 0) seen[tag].keys.push(x.key); return; }
+        var s = docState(index, id, rv), d = seen[tag] = { doc: id, rev: rv, released: s.released, keys: [x.key] };
+        out[s.state].push(d);
+      });
+    });
+    ["released", "work"].forEach(function (st) {
+      var ks = {}; out[st].forEach(function (d) { d.keys.forEach(function (k) { ks[k] = 1; }); });
+      out.keys[st] = Object.keys(ks);
+      out[st].sort(function (a, b) { return a.doc.localeCompare(b.doc); });
+    });
+    return out;
+  }
   function median(sorted) { var n = sorted.length, m = Math.floor(n / 2); return n % 2 ? sorted[m] : (sorted[m - 1] + sorted[m]) / 2; }
   // the Sundays of the last WEEKS weeks, oldest first, this week last
   function weekList(today, n) { var w = K.weekStart(today), out = []; for (var i = (n || WEEKS) - 1; i >= 0; i--) out.push(w - 7 * i); return out; }
@@ -101,7 +116,8 @@
     opt = opt || {};
     var now = opt.now || new Date(), today = K.serialOf(now), cdf = sheets.cdf, gi = gccIndex(sheets.gcc);
     var out = { at: now.toISOString(), today: today, sources: { cdf: !!(cdf && cdf.length > 1), gcc: !!(sheets.gcc && sheets.gcc.length > 1), rev: !!(sheets.rev && sheets.rev.length > 1) } };
-    if (!out.sources.cdf) { out.empty = true; out.docs = docsOf(sheets.rev, today); return out; }
+    var ri = revIndex(sheets.rev);
+    if (!out.sources.cdf) { out.empty = true; return out; }
     var ex = {}; (opt.exclude || []).forEach(function (x) { ex[K.keyFull(x)] = true; });
     var all = cdfsOf(cdf).filter(function (x) { return !ex[K.keyFull(x.key)]; });   // a known duplicate (rules.txt EXCLUDE) isn't counted
     all.forEach(function (x) {
@@ -153,7 +169,7 @@
     var noDoc = open.filter(function (x) { return /no eng/i.test(x.mantra) || (!x.docs && /^3\s*-/.test(x.station)); });
     out.noDoc = { n: noDoc.length, keys: noDoc.map(k) };
     out.notInGcc = sheets.gcc && sheets.gcc.length > 1 ? all.filter(function (x) { return !x.inGcc && x.status !== "Cancelled"; }).map(k) : [];
-    out.docs = docsOf(sheets.rev, today);
+    out.docs = docsOf(cdf, open, ri);
 
     // trend: the stored snapshots + today
     var hist = (opt.history || []).filter(function (s) { return s && s.d < today; }).concat([snapshot(out)]);
@@ -186,6 +202,6 @@
     return ref ? { open: cur.open - ref.open, released: cur.released - ref.released, since: ref.d } : null;
   }
 
-  return { build: build, cdfsOf: cdfsOf, gccIndex: gccIndex, docsOf: docsOf, weekList: weekList, snapshot: snapshot, mergeHistory: mergeHistory, deltaWeek: deltaWeek,
+  return { build: build, cdfsOf: cdfsOf, gccIndex: gccIndex, docsOf: docsOf, revIndex: revIndex, docState: docState, weekList: weekList, snapshot: snapshot, mergeHistory: mergeHistory, deltaWeek: deltaWeek,
     supplierOf: supplierOf, stationOrder: stationOrder, statusOf: statusOf, median: median, AGE_BUCKETS: AGE_BUCKETS, WEEKS: WEEKS, PACE_WEEKS: PACE_WEEKS };
 });

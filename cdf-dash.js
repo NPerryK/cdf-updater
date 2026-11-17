@@ -26,7 +26,7 @@
   function freshText(m, today) {
     var out = [];
     if (m.fresh && m.fresh.gcc != null) out.push({ name: "GCC", day: m.fresh.gcc, old: today - m.fresh.gcc > 3 });
-    if (m.docs && m.docs.latest != null) out.push({ name: "MANTRAREV", day: m.docs.latest, old: m.docs.staleDays > 7 });
+    if (m.docs && m.docs.latest != null) out.push({ name: "MANTRAREV", day: m.docs.latest, old: today - m.docs.latest > 7 });
     return out;
   }
 
@@ -53,7 +53,7 @@
       list(k.id, k.label + " CDFs", k.keys);
       var d = k.d == null || !k.d ? "" : '<span class="kd ' + (k.d * k.good > 0 ? "up" : "down") + '" title="since ' + K.ddmm(dw.since) + '">' + sign(k.d) + "</span>";
       return '<div class="kpi ' + k.cls + (k.n ? " tap" : "") + '"' + tap(k.id, k.n) + '><span class="kn">' + k.n + '</span><span class="kl">' + k.label + d + "</span></div>";
-    }).join("") + '<div class="kpi ringbox">' + G.ring(st.pct, { label: "released", size: present ? 112 : 76 }) + "</div></div>" +
+    }).join("") + '<div class="kpi ringbox">' + G.ring(st.pct, { label: "released", size: present ? 112 : 62 }) + "</div></div>" +
       G.strip([{ n: st.released, cls: "c-rel", label: "Released" }, { n: st.open, cls: "c-open", label: "Open" }, { n: st.cancelled, cls: "c-can", label: "Cancelled" }], { width: W });
     var wk = m.week;
     list("week:closed", "Released in the last 7 days", wk.closedKeys); list("week:opened", "Opened in the last 7 days", wk.openedKeys);
@@ -97,18 +97,21 @@
     html += card("trend", "Open CDFs over time", G.line(m.trend.map(function (t) { return { d: t.d, v: t.open }; }), { width: W, height: present ? 170 : 96, target: tg, title: "Open CDFs over time",
       empty: "The line starts tomorrow: the add-in keeps one point a day in this workbook." }) + (tg ? '<p class="dnote">Target: ' + tg.value + " open" + (tg.by ? " by " + K.ddmmyyyy(tg.by) : "") + ".</p>" : ""), m.trend.length > 1 ? plural(m.trend.length, "day") : "");
 
-    // ---- documents (MANTRAREV)
-    var d = m.docs;
+    // ---- solution documents: released or in work (MANTRAREV)
+    var d = m.docs, T = "Solution documents";
     if (d && !d.error) {
-      var types = d.types.map(function (t) { return '<span class="chip">' + esc(t.name) + " <b>" + t.n + "</b></span>"; }).join("");
-      var last = d.last7.slice(0, present ? 8 : 4).map(function (x) { return "<li><span class=\"ok\">" + esc(x.id + (x.rev ? " " + x.rev : "")) + '</span><span class="os">' + esc(x.title.slice(0, 44)) + '</span><span class="od">' + K.ddmm(x.day) + "</span></li>"; }).join("");
-      html += card("docs", "Documents released (MANTRAREV)",
-        '<div class="mini"><span><b>' + d.last7.length + "</b> last 7 days</span><span><b>" + d.last30 + "</b> last 30 days</span>" + (d.medianDays != null ? "<span><b>" + d.medianDays + "</b> days to release (median)</span>" : "") + "</div>" +
-        G.columns1(d.weekly, { width: W, height: present ? 150 : 96, title: "Documents released per week" }) +
-        (types ? '<div class="chips">' + types + "</div>" : "") + (last ? '<ol class="oldest docs">' + last + "</ol>" : "") +
-        (d.staleDays > 7 ? '<p class="dnote warn">The newest release in MANTRAREV is from ' + K.ddmmyyyy(d.latest) + " — import a fresh export to see this week.</p>" : ""), plural(d.total, "release"));
-    } else if (d && d.error) html += card("docs", "Documents released (MANTRAREV)", '<p class="dnote warn">' + esc(d.error) + "</p>");
-    else html += card("docs", "Documents released (MANTRAREV)", '<div class="chart-empty">No MANTRAREV sheet yet — import the released-documents export.</div>');
+      list("doc:released", "Open CDFs with a released solution revision", d.keys.released);
+      list("doc:work", "Open CDFs with a solution revision in work", d.keys.work);
+      var wl = d.work.slice(0, present ? 10 : 5).map(function (x) {
+        return '<li data-key="' + esc(x.keys[0]) + '" class="tap" tabindex="0" role="button"><span class="ok">' + esc(x.doc + " " + x.rev) + '</span><span class="os">' + esc(x.released ? "rev " + x.released + " released" : "no revision released") + '</span><span class="od">' + esc(x.keys[0].replace(/^A330-1-/, "")) + (x.keys.length > 1 ? " +" + (x.keys.length - 1) : "") + "</span></li>";
+      }).join("");
+      html += card("docs", T,
+        '<div class="attn"><div class="at tap"' + tap("doc:released", d.released.length) + '><span class="an c-rel-t">' + d.released.length + '</span><span class="al">revisions released</span></div>' +
+        '<div class="at tap"' + tap("doc:work", d.work.length) + '><span class="an c-work-t">' + d.work.length + '</span><span class="al">revisions in work</span></div></div>' +
+        (wl ? '<div class="sublabel">In work</div><ol class="oldest docs">' + wl + "</ol>" : "") +
+        (d.latest != null && m.today - d.latest > 7 ? '<p class="dnote warn">MANTRAREV ends on ' + K.ddmmyyyy(d.latest) + " — a revision released since then still shows as in work. Import a fresh export.</p>" : ""), "open CDFs · MANTRAREV");
+    } else if (d && d.error) html += card("docs", T, '<p class="dnote warn">' + esc(d.error) + "</p>");
+    else html += card("docs", T, '<div class="chart-empty">No MANTRAREV sheet yet — import it to tell released revisions from revisions in work.</div>');
 
     return { html: html, lists: lists, cards: cards };
   }

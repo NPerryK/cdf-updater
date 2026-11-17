@@ -96,7 +96,7 @@
     return '<svg class="chart ring" viewBox="0 0 ' + s + " " + s + '" width="' + s + '" height="' + s + '" role="img" aria-label="' + esc(pct + "% " + (opt.label || "")) + '">' +
       '<circle class="ch-track" cx="' + s / 2 + '" cy="' + s / 2 + '" r="' + r + '" fill="none" stroke-width="9"/>' +
       '<circle class="ch-arc ' + (opt.cls || "c-rel") + '" cx="' + s / 2 + '" cy="' + s / 2 + '" r="' + r + '" fill="none" stroke-width="9" stroke-linecap="round" stroke-dasharray="' + f1(len) + " " + f1(c) + '" transform="rotate(-90 ' + s / 2 + " " + s / 2 + ')"/>' +
-      '<text class="t-ring" x="50%" y="' + (s / 2 + 2) + '" text-anchor="middle">' + pct + '%</text><text class="t-ring-sub" x="50%" y="' + (s / 2 + 15) + '" text-anchor="middle">' + esc(opt.label || "") + "</text></svg>";
+      '<text class="t-ring" x="50%" y="' + (s / 2 + (s >= 80 ? 2 : 5)) + '" text-anchor="middle">' + pct + '%</text>' + (s >= 80 ? '<text class="t-ring-sub" x="50%" y="' + (s / 2 + 15) + '" text-anchor="middle">' + esc(opt.label || "") + "</text>" : "") + "</svg>";
   }
 
   // a stacked strip of the status split: [{ n, cls, label }]

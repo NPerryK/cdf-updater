@@ -97,17 +97,16 @@
       foot(s, m, n);
     }
 
-    // 6 — documents
+    // 6 — solution documents: released or in work (MANTRAREV)
     var d = m.docs;
     if (d && !d.error) {
       s = pptx.addSlide(); n++;
-      title(pptx, s, "Documents released (MANTRAREV)", d.total + " releases in the sheet");
-      kpi(s, 0.5, 1.3, 2.9, d.last7.length, "Released, last 7 days", DOC);
-      kpi(s, 0.5, 3.05, 2.9, d.last30, "Released, last 30 days", DOC);
-      if (d.medianDays != null) kpi(s, 0.5, 4.8, 2.9, d.medianDays, "Days to release (median, 30 days)", MID);
-      s.addChart(pptx.ChartType.bar, [{ name: "Released", labels: d.weekly.map(function (w) { return K.ddmm(w.week); }), values: d.weekly.map(function (w) { return w.n; }) }],
-        merge(axis(), { x: 3.7, y: 1.2, w: 9.1, h: 5.1, barDir: "col", chartColors: [DOC], showValue: true, barGapWidthPct: 50, showTitle: true, title: "Per week", titleFontFace: FONT, titleFontSize: 13, titleColor: INK }));
-      if (d.staleDays > 7) note(s, "The newest release in MANTRAREV is from " + K.ddmmyyyy(d.latest) + ": the export is " + d.staleDays + " days old.", 6.45);
+      title(pptx, s, "Solution documents of the open CDFs", "Released or in work, by MANTRAREV");
+      kpi(s, 0.5, 1.3, 2.9, d.released.length, "Revisions released", REL);
+      kpi(s, 0.5, 3.05, 2.9, d.work.length, "Revisions in work", OPEN);
+      var wl = d.work.slice(0, 11).map(function (x) { return { text: x.doc + " rev " + x.rev + " — " + (x.released ? "rev " + x.released + " released" : "no revision released") + " (" + x.keys.join(", ") + ")", options: { bullet: true } }; });
+      if (wl.length) s.addText([{ text: "In work", options: { bold: true, breakLine: true } }].concat(wl), { x: 3.8, y: 1.3, w: 9, h: 5, fontFace: FONT, fontSize: 13, color: INK, valign: "top", paraSpaceAfter: 3 });
+      if (d.work.length > 11) note(s, "and " + (d.work.length - 11) + " more in work.", 6.45);
       foot(s, m, n);
     }
 
