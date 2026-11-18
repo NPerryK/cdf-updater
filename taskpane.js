@@ -66,6 +66,7 @@
     drop.addEventListener("dragover", function (ev) { ev.preventDefault(); drop.classList.add("drag"); });
     drop.addEventListener("dragleave", function () { drop.classList.remove("drag"); });
     drop.addEventListener("drop", function (ev) { ev.preventDefault(); drop.classList.remove("drag"); takeFiles(ev.dataTransfer.files); });
+    $("slotInput").addEventListener("change", function () { var i = $("slotInput"); if (state.slotTarget) takeFiles(i.files, state.slotTarget); i.value = ""; });
     drop.addEventListener("keydown", function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); input.click(); } });
     $("importBtn").addEventListener("click", askImport);
     $("importYes").addEventListener("click", doImport);
@@ -211,11 +212,13 @@
   }
   function readAll() {
     return Excel.run(function (ctx) {
-      var names = (state.rules ? state.rules.imports : K.DEFAULT_RULES.imports).map(function (i) { return i.target; });
+      var r = state.rules || K.DEFAULT_RULES, names = ["CDF"];
+      r.imports.forEach(function (i) { if (names.indexOf(i.target) < 0) names.push(i.target); });
+      if (r.log && names.indexOf(r.log) < 0) names.push(r.log);
       return readSheets(ctx, names).then(function (rd) {
         var byTarget = {};
         names.forEach(function (n) { byTarget[n] = rd.sheets[n] ? rd.sheets[n].values : null; });
-        state.data = { cdf: byTarget.CDF, gcc: byTarget.GCC, rev: byTarget.MANTRAREV, all: byTarget };
+        state.data = { cdf: byTarget.CDF, gcc: byTarget.GCC, rev: byTarget.MANTRAREV, all: byTarget, imported: K.lastImports(r.log ? byTarget[r.log] : null) };
         state.readAt = Date.now();
         return state.data;
       });
@@ -600,15 +603,22 @@
   }
 
 
-  // ================= IMPORT: replace CDF, GCC, MANTRAREV — each file goes to the sheet its headers belong to =================
+  // ================= IMPORT: replace Mantra (650), GCC, MANTRAREV — each file goes to the sheet its headers belong to =================
   function imports() { return (state.rules || K.parseRules("")).imports; }
-  function takeFiles(list) {
+  // forTarget: the file was dropped on (or chosen in) that sheet's box — it goes there, whatever its headers say
+  function takeFiles(list, forTarget) {
     var files = Array.prototype.slice.call(list || []);
     if (!files.length) return;
+    if (forTarget) files = files.slice(0, 1);
     $("importConfirm").classList.add("hidden"); $("importMsg").innerHTML = "";
     setStatus("Reading the files…");
     Promise.all(files.map(detectFile)).then(function (found) {
       found.forEach(function (f) {
+        if (forTarget && !f.error) {
+          if (f.target === forTarget && !f.weak) f.why = "its headers, dropped on this box";
+          else { f.why = f.target && f.target !== forTarget ? "your choice — its headers look like " + f.target + ", check it's the right file" : "your choice — its headers didn't match, check it's the right file"; f.weak = true; }
+          f.target = forTarget;
+        }
         state.files = state.files.filter(function (x) { return x.file.name !== f.file.name && (!f.target || x.target !== f.target); });
         state.files.push(f);
       });
@@ -685,11 +695,13 @@
   function renderSlots() {
     var box = $("slots");
     if (!box) return;
-    var d = state.data || {}, html = imports().map(function (imp) {
+    var d = state.data || {}, today = K.serialOf(new Date()), html = imports().map(function (imp) {
       var f = state.files.filter(function (x) { return x.target === imp.target; })[0], cur = d.all && d.all[imp.target], done = state.importDone[imp.target];
-      return '<div class="slot2' + (f ? " has" : "") + '"><div class="s-head"><b>' + esc(imp.target) + '</b><span class="s-now">' + (cur ? "in the workbook: " + Math.max(0, cur.length - 1) + " rows" : "not in the workbook yet — will be created") + "</span></div>" +
+      var when = (d.imported || {})[imp.target.toUpperCase()], newest = cur ? K.newestDate(cur, today) : null;
+      var upd = cur ? '<div class="s-upd" title="Replaced: the last time the add-in replaced it (UPDATE LOG). Data to: the newest date in its Date columns.">' + ([when ? "Replaced <b>" + esc(when) + "</b>" : "", newest != null ? (when ? "data" : "Data") + " to <b>" + esc(K.ddmmyyyy(newest)) + "</b>" : ""].filter(Boolean).join(" · ") || "No dates in it") + "</div>" : "";
+      return '<div class="slot2' + (f ? " has" : "") + '" data-slot="' + esc(imp.target) + '" tabindex="0" role="button" aria-label="Drop or choose the file for sheet ' + esc(imp.target) + '"><div class="s-head"><b>' + esc(imp.target) + '</b><span class="s-now">' + (cur ? "in the workbook: " + Math.max(0, cur.length - 1) + " rows" : "not in the workbook yet — will be created") + "</span></div>" + upd +
         (f ? '<div class="s-file">' + esc(f.file.name) + (f.sheet ? " · sheet “" + esc(f.sheet) + "”" : "") + " · " + f.rows + " rows <button class=\"slot-clear\" type=\"button\" data-clear=\"" + esc(f.file.name) + '" title="Remove">✕</button></div><div class="s-why' + (f.weak ? " warn-text" : "") + '">Matched by ' + esc(f.why) + "</div>"
-          : '<div class="s-file dim">' + (done ? esc(done) : "No file chosen") + "</div>") + "</div>";
+          : '<div class="s-file dim">' + (done ? esc(done) : "Drop the file here, or click to choose") + "</div>") + "</div>";
     }).join("");
     var loose = state.files.filter(function (x) { return !x.target; });
     html += loose.map(function (f) {
@@ -698,6 +710,15 @@
           imports().map(function (i) { return '<option value="' + esc(i.target) + '">' + esc(i.target) + "</option>"; }).join("") + "</select>") + "</div>";
     }).join("");
     box.innerHTML = html;
+    Array.prototype.forEach.call(box.querySelectorAll("[data-slot]"), function (el) {
+      var t = el.getAttribute("data-slot");
+      el.addEventListener("dragover", function (ev) { ev.preventDefault(); ev.stopPropagation(); el.classList.add("drag"); });
+      el.addEventListener("dragleave", function () { el.classList.remove("drag"); });
+      el.addEventListener("drop", function (ev) { ev.preventDefault(); ev.stopPropagation(); el.classList.remove("drag"); takeFiles(ev.dataTransfer.files, t); });
+      function pick(ev) { if (ev.target.closest && ev.target.closest("button,select")) return; state.slotTarget = t; var i = $("slotInput"); i.value = ""; i.click(); }
+      el.addEventListener("click", pick);
+      el.addEventListener("keydown", function (ev) { if ((ev.key === "Enter" || ev.key === " ") && ev.target === el) { ev.preventDefault(); pick(ev); } });
+    });
     Array.prototype.forEach.call(box.querySelectorAll("[data-clear]"), function (b) { b.addEventListener("click", function () { state.files = state.files.filter(function (x) { return x.file.name !== b.getAttribute("data-clear"); }); renderSlots(); refreshButtons(); }); });
     Array.prototype.forEach.call(box.querySelectorAll("[data-pick]"), function (s) {
       s.addEventListener("change", function () {
@@ -708,7 +729,10 @@
       });
     });
   }
-  function chosen() { return state.files.filter(function (x) { return x.target && !x.error; }); }
+  function chosen() {
+    var order = imports().map(function (i) { return i.target; });
+    return state.files.filter(function (x) { return x.target && !x.error; }).sort(function (a, b) { return order.indexOf(a.target) - order.indexOf(b.target); });
+  }
   function askImport() {
     var c = chosen();
     if (!c.length) return;

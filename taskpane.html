@@ -5,18 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CDF Updater</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-  <script src="lib/jszip.min.js?v=2.1.0"></script>
-  <script src="cdf-core.js?v=2.1.0"></script>
-  <script src="cdf-link.js?v=2.1.0"></script>
-  <script src="cdf-stats.js?v=2.1.0"></script>
-  <script src="cdf-charts.js?v=2.1.0"></script>
-  <script src="cdf-dash.js?v=2.1.0"></script>
-  <script src="cdf-rows.js?v=2.1.0"></script>
-  <script src="cdf-notes.js?v=2.1.0"></script>
-  <script src="cdf-look.js?v=2.1.0"></script>
-  <script src="cdf-deck.js?v=2.1.0"></script>
-  <script src="cdf-summary.js?v=2.1.0"></script>
-  <link rel="stylesheet" href="taskpane.css?v=2.1.0">
+  <script src="lib/jszip.min.js?v=2.2.0"></script>
+  <script src="cdf-core.js?v=2.2.0"></script>
+  <script src="cdf-link.js?v=2.2.0"></script>
+  <script src="cdf-stats.js?v=2.2.0"></script>
+  <script src="cdf-charts.js?v=2.2.0"></script>
+  <script src="cdf-dash.js?v=2.2.0"></script>
+  <script src="cdf-rows.js?v=2.2.0"></script>
+  <script src="cdf-notes.js?v=2.2.0"></script>
+  <script src="cdf-look.js?v=2.2.0"></script>
+  <script src="cdf-deck.js?v=2.2.0"></script>
+  <script src="cdf-summary.js?v=2.2.0"></script>
+  <link rel="stylesheet" href="taskpane.css?v=2.2.0">
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -44,7 +44,7 @@
         <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/></svg>
       </span>
       <div class="brand">
-        <h1>CDF Updater <span id="appVersion" class="ver" title="Add-in version">v2.1.0</span></h1>
+        <h1>CDF Updater <span id="appVersion" class="ver" title="Add-in version">v2.2.0</span></h1>
         <p>A330-300 P2F deviation tracker</p>
       </div>
       <button id="lookupOpen" class="deck-btn" type="button" title="Find a CDF (Ctrl+F)" aria-label="Find a CDF"><svg class="ico"><use href="#i-find"/></svg></button>
@@ -98,7 +98,8 @@
     <section class="page" id="page-import" role="tabpanel" aria-labelledby="tab-import">
       <section class="card">
         <div class="card-head"><h2>Replace sheets</h2></div>
-        <p class="hint">Drop the exports here — all of them at once is fine. Each file is matched to its sheet by its <b>column headers</b>, not its name: CDF, GCC (CDF_List_Export) and MANTRAREV (released documents). A sheet that isn't in the workbook yet is created.</p>
+        <p class="hint">Drop the exports here — all of them at once is fine — and each file is matched to its sheet by its <b>column headers</b>: Mantra (report 650), GCC (CDF_List_Export) and MANTRAREV (released revisions). Or drop a file straight on its sheet's box below. A sheet that isn't in the workbook yet is created.</p>
+        <input id="slotInput" type="file" accept=".xlsx,.xlsm,.csv" hidden>
         <label id="drop" class="drop" tabindex="0">
           <input id="dropInput" type="file" accept=".xlsx,.xlsm,.csv" multiple hidden>
           <svg class="ico"><use href="#i-download"/></svg>
@@ -257,6 +258,6 @@
     <div id="status" class="ab-status hidden" role="status"><span class="spinner"></span><span id="statusText"></span></div>
   </footer>
 
-  <script src="taskpane.js?v=2.1.0"></script>
+  <script src="taskpane.js?v=2.2.0"></script>
 </body>
 </html>

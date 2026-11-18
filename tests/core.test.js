@@ -60,7 +60,7 @@ test("looseJson", "smart quotes and a trailing comma", () => assert.deepStrictEq
 test("looseJson", "Python style", () => assert.deepStrictEqual(K.looseJson("[['a', None, True]]").data, [["a", null, true]]));
 test("looseJson", "no JSON", () => assert.strictEqual(K.looseJson("hello").kind, "nojson"));
 test("looseJson", "cut off", () => assert.strictEqual(K.looseJson('{"a": [1, 2').kind, "cut"));
-test("parseRules", "the shipped rules.txt has no errors", () => { const r = K.parseRules(require("fs").readFileSync(__dirname + "/../rules.txt", "utf8")); assert.deepStrictEqual(r.errors, []); assert.deepStrictEqual(r.imports.map((i) => i.target), ["CDF", "GCC", "MANTRAREV"]); });
+test("parseRules", "the shipped rules.txt has no errors", () => { const r = K.parseRules(require("fs").readFileSync(__dirname + "/../rules.txt", "utf8")); assert.deepStrictEqual(r.errors, []); assert.deepStrictEqual(r.imports.map((i) => i.target), ["Mantra", "GCC", "MANTRAREV"]); });
 test("parseRules", "defaults when empty", () => { const r = K.parseRules(""); assert.strictEqual(r.imports.length, 3); assert.deepStrictEqual(r.exclude, ["A330-1-052 (another)"]); assert.strictEqual(r.log, "UPDATE LOG"); });
 test("parseRules", "an old 1.x line is reported, not obeyed", () => assert.ok(/isn't a setting this version knows/.test(K.parseRules('FINAL_APPROVAL_RELEASE "X"').errors[0])));
 test("parseRules", "IMPORT without HEADERS", () => assert.ok(/needs HEADERS/.test(K.parseRules('IMPORT "GCC" FILE "x"').errors[0])));
@@ -71,14 +71,30 @@ test("parseRules", "TARGET, STUCK_DAYS, ROWS_COLUMNS, EXCLUDE", () => {
 const IMPS = K.parseRules("").imports;
 test("importFor", "GCC by its headers", () => assert.strictEqual(K.importFor([["CDF Number", "Site", "Current Station"]], IMPS).target, "GCC"));
 test("importFor", "MANTRAREV, header in the 2nd row", () => assert.strictEqual(K.importFor([["report"], ["Project", "Doc ID", "Rev", "Release Date"]], IMPS).target, "MANTRAREV"));
-test("importFor", "CDF", () => assert.strictEqual(K.importFor([["CDF NUM (LINK TO DEV)", "x", "CDF STATUS (GCC)"]], IMPS).target, "CDF"));
+test("importFor", "the 650 report → Mantra, header in the 2nd row", () => assert.strictEqual(K.importFor([[], ["Project", "Lvl", "Doc ID", "Rev", "Doc Title", "Status", "Date Status", "Author Name", "Count Pendings", "Pending To Emp"]], IMPS).target, "Mantra"));
+test("importFor", "sheet CDF is not imported", () => assert.strictEqual(K.importFor([["CDF NUM (LINK TO DEV)", "x", "CDF STATUS (GCC)"]], IMPS), null));
 test("importFor", "case and spaces", () => assert.strictEqual(K.importFor([["cdf  number", "CURRENT STATION "]], IMPS).target, "GCC"));
-test("importFor", "the 650 report (Mantra status) is not MANTRAREV", () => assert.strictEqual(K.importFor([["Project", "Doc ID", "Rev", "Status", "Date Status"]], IMPS), null));
+test("importFor", "the 650 report is not MANTRAREV, MANTRAREV is not Mantra", () => { assert.strictEqual(K.importFor([["Project", "Doc ID", "Rev", "Status", "Date Status", "Pending To Emp"]], IMPS).target, "Mantra"); assert.strictEqual(K.importFor([["Doc ID", "Rev", "Release Date", "Days Cal"]], IMPS).target, "MANTRAREV"); });
 test("fileNameFor", "part of the name", () => assert.strictEqual(K.fileNameFor("CDF_List_Export (3).xlsx", IMPS).target, "GCC"));
 test("fileNameFor", "case", () => assert.strictEqual(K.fileNameFor("cdf_list_export.xlsx", IMPS).target, "GCC"));
 test("fileNameFor", "no FILE → no match", () => assert.strictEqual(K.fileNameFor("CDF.xlsx", IMPS), null));
 test("fileNameFor", "MANTRAREV by name", () => assert.strictEqual(K.fileNameFor("mantrarev 0911.xlsx", K.parseRules(require("fs").readFileSync(__dirname + "/../rules.txt", "utf8")).imports).target, "MANTRAREV"));
 test("fileNameFor", "nothing", () => assert.strictEqual(K.fileNameFor("", IMPS), null));
+test("fileNameFor", "650 → Mantra", () => assert.strictEqual(K.fileNameFor("650 (29).xlsx", IMPS).target, "Mantra"));
+
+// ---------- when a sheet was last updated ----------
+const T0 = K.daySerial("2026-11-17");
+test("newestDate", "the newest date in the Date columns", () => assert.strictEqual(K.newestDate([["Doc ID", "Date Status"], ["a", T0 - 3 + 0.4], ["b", T0 - 1 + 0.9]], T0), T0 - 1));
+test("newestDate", "header in the 2nd row, several date columns", () => assert.strictEqual(K.newestDate([[], ["CDF Number", "Open Date", "Close Date"], ["x", "2026-11-10", ""], ["y", "2026-11-01", "15/11/2026"]], T0), K.daySerial("2026-11-15")));
+test("newestDate", "Due Date and the future are left out", () => assert.strictEqual(K.newestDate([["Date Status", "Due Date"], [T0 - 5, T0 + 30], [T0 + 9, ""]], T0), T0 - 5));
+test("newestDate", "no Date column → null", () => assert.strictEqual(K.newestDate([["a", "b"], [1, 2]], T0), null));
+test("newestDate", "empty / no dates → null", () => { assert.strictEqual(K.newestDate(null, T0), null); assert.strictEqual(K.newestDate([["Release Date"], ["-"], [""]], T0), null); });
+const LOG = [["Time", "Action", "Sheet"], ["10/11/2026 08:00", "IMPORT", "GCC"], ["12/11/2026 09:30", "ROWS", "CDF"], ["17/11/2026 07:45", "IMPORT", "GCC"], ["16/11/2026 12:00", "IMPORT", "Mantra"]];
+test("lastImports", "the last IMPORT of each sheet", () => assert.deepStrictEqual(K.lastImports(LOG), { GCC: "17/11/2026 07:45", MANTRA: "16/11/2026 12:00" }));
+test("lastImports", "other actions are left out", () => assert.ok(!K.lastImports(LOG).CDF));
+test("lastImports", "the header row is not a line", () => assert.deepStrictEqual(K.lastImports([["Time", "IMPORT", "GCC"]]), {}));
+test("lastImports", "no log → {}", () => { assert.deepStrictEqual(K.lastImports(null), {}); assert.deepStrictEqual(K.lastImports([]), {}); });
+test("lastImports", "case and spaces", () => assert.deepStrictEqual(K.lastImports([["h"], [" 01/11/2026 10:00 ", "import ", " mantrarev "]]), { MANTRAREV: "01/11/2026 10:00" }));
 
 // ---------- rows ----------
 const AI = ["A330-1-902.B", "", "", "08/11/2026", "ROUTINE", "DESC", "TAGS", "DWG-1", "DWG NAME", "C1", "-", "", "Ron Avi"];

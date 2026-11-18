@@ -16,6 +16,8 @@ def col(L):
     for ch in L: n = n * 26 + ord(ch) - 64
     return n - 1
 TODAY = 46335          # Mon 09/11/2026 (the clock below)
+import datetime
+def ddmmyyyy(n): return (datetime.date(1899, 12, 30) + datetime.timedelta(days=n)).strftime("%d/%m/%Y")
 def cdf_row(n, R, x, rev="-"):
     r = [""] * 34
     k = "A330-1-%03d" % n
@@ -113,7 +115,7 @@ with sync_playwright() as p:
 
     print("\nPresent, PowerPoint, Copy")
     page.click("#dashPresent")
-    check(page.evaluate("(window.__dialogs || []).some(u => /present\\.html\\?v=2\\.1\\.0$/.test(u))"), "Present opens present.html in an Office dialog")
+    check(page.evaluate("(window.__dialogs || []).some(u => /present\\.html\\?v=2\\.2\\.0$/.test(u))"), "Present opens present.html in an Office dialog")
     handed = page.evaluate("JSON.parse(localStorage.getItem('cdfUpdater.present.v2')).model.status.open")
     check(handed == 3, "the model is handed to the present view")
     with page.expect_download(timeout=30000) as dl: page.click("#dashDeck")
@@ -137,12 +139,32 @@ with sync_playwright() as p:
     check("not in the workbook yet — will be created" in sl, "MANTRAREV doesn't exist yet: it will be created")
     check("neither its headers nor its name match" in sl, "an unrelated file asks which sheet")
     check(page.inner_text("#importBtn") == "Replace GCC, MANTRAREV", "the button names the sheets: " + page.inner_text("#importBtn"))
+    print("\nIMPORT — straight onto a sheet's box")
+    M650 = [[""] * 7, ["Project", "Doc ID", "Rev", "Status", "Date Status", "Pending To Emp", "Due Date"]] + [["A330", "330-1-%d" % i, "A", "IN-WORK", TODAY - 2 - i, "Tom Bar", TODAY + 40] for i in range(6)]
+    xlsx(os.path.join(tmp, "650 (29).xlsx"), "650", M650)
+    page.evaluate("m => { window.__fixtures['650'] = m; }", M650)
+    check(page.query_selector("[data-slot=Mantra]") is not None and page.query_selector("[data-slot=CDF]") is None, "the boxes are Mantra, GCC, MANTRAREV — sheet CDF isn't replaced here")
+    with page.expect_file_chooser() as fc: page.click("[data-slot=Mantra] .s-file")
+    fc.value.set_files(os.path.join(tmp, "650 (29).xlsx")); page.wait_for_timeout(400)
+    mt = page.inner_text("[data-slot=Mantra]")
+    check("650 (29).xlsx" in mt and "dropped on this box" in mt, "a click on the Mantra box chooses the 650 file: " + mt.replace("\n", " ")[:120])
+    page.evaluate("""() => { const dt = new DataTransfer(); dt.items.add(new File(["a,b\\n1,2"], "odd.csv", { type: "text/csv" }));
+      document.querySelector("[data-slot=GCC]").dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true })); }""")
+    page.wait_for_timeout(400)
+    gt = page.inner_text("[data-slot=GCC]")
+    check("odd.csv" in gt and "check it's the right file" in gt, "a file dropped on the GCC box goes there, with a warning when its headers don't match")
+    page.click("[data-slot=GCC] [data-clear='odd.csv']"); page.wait_for_timeout(200)
+    page.set_input_files("#dropInput", os.path.join(tmp, "CDF_List_Export.xlsx")); page.wait_for_timeout(400)
+    check(page.inner_text("#importBtn") == "Replace Mantra, GCC, MANTRAREV", "the button names the sheets: " + page.inner_text("#importBtn"))
     page.click("#importBtn"); page.wait_for_selector("#importConfirm:not(.hidden)")
-    check("will be replaced" in page.inner_text("#importConfirmText") and "New sheet: MANTRAREV" in page.inner_text("#importConfirmText"), "confirm: GCC replaced, MANTRAREV new")
+    check("will be replaced" in page.inner_text("#importConfirmText") and "New sheets: Mantra, MANTRAREV" in page.inner_text("#importConfirmText"), "confirm: GCC replaced, Mantra and MANTRAREV new: " + page.inner_text("#importConfirmText")[:150])
     page.click("#importYes"); page.wait_for_selector("#importMsg .note.ok", timeout=20000)
     check(len(sheet(page, "GCC")) == len(NEW_GCC) and sheet(page, "MANTRAREV") is not None, "GCC replaced (%d rows), MANTRAREV created" % len(sheet(page, "GCC")))
     log = sheet(page, "UPDATE LOG")
-    check(log and sum(1 for r in log if r[1] == "IMPORT") == 2, "two IMPORT lines in UPDATE LOG")
+    check(log and sum(1 for r in log if r[1] == "IMPORT") == 3, "three IMPORT lines in UPDATE LOG")
+    page.wait_for_timeout(300)
+    up = page.inner_text("[data-slot=Mantra] .s-upd")
+    check(re.search(r"Replaced \d\d/\d\d/\d{4} \d\d:\d\d", up) and "data to " + ddmmyyyy(TODAY - 2) in up, "under the box: when it was replaced and its newest date (Due Date left out): " + up)
     page.click("#tab-status"); page.wait_for_timeout(300)
     check("SHEETS 3/3" in page.inner_text("#sheetsLamp"), "all three sheets there now")
     dc = page.inner_text("[data-card=docs]")

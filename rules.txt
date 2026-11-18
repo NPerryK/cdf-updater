@@ -4,7 +4,8 @@
 
 # ---- which file replaces which sheet: a file goes to the sheet whose HEADERS are all in one of its first rows.
 #      FILE is a fallback: part of the file name, used only when the headers don't match.
-IMPORT "CDF"        HEADERS "CDF NUM (LINK TO DEV)" "CDF STATUS (GCC)"
+#      Sheet CDF is the algorithm's: it isn't replaced here.
+IMPORT "Mantra"     HEADERS "Doc ID" "Date Status" "Pending To Emp"  FILE "650"
 IMPORT "GCC"        HEADERS "CDF Number" "Current Station"      FILE "CDF_List_Export"
 IMPORT "MANTRAREV"  HEADERS "Doc ID" "Release Date"             FILE "MANTRAREV"
 

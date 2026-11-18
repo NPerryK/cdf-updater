@@ -971,6 +971,11 @@ td.rule, span.rule { color: var(--muted); font-size: 11px; white-space: nowrap; 
 .slots { display: grid; gap: 7px; margin-bottom: 10px; }
 .slot2 { padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; }
 .slot2.has { border-color: var(--action); background: var(--action-soft); }
+.slot2[data-slot] { cursor: pointer; transition: border-color .12s, background-color .12s; }
+.slot2[data-slot]:hover, .slot2[data-slot]:focus-visible { border-color: var(--action); outline: none; }
+.slot2.drag { border: 1.5px dashed var(--action); background: var(--action-soft); }
+.slot2 .s-upd { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.slot2 .s-upd b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 .slot2.bad { border-color: var(--caution-line); background: var(--caution-soft); }
 .slot2 .s-head { display: flex; align-items: baseline; gap: 8px; }
 .slot2 .s-now { margin-inline-start: auto; font-size: 11px; color: var(--muted); }

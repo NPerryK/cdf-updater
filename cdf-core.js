@@ -116,9 +116,9 @@
   // ---------- rules.txt ----------
   var DEFAULT_RULES = {
     imports: [
-      { target: "CDF", headers: ["CDF NUM (LINK TO DEV)", "CDF STATUS (GCC)"], file: "" },
+      { target: "Mantra", headers: ["Doc ID", "Date Status", "Pending To Emp"], file: "650" },
       { target: "GCC", headers: ["CDF Number", "Current Station"], file: "CDF_List_Export" },
-      { target: "MANTRAREV", headers: ["Doc ID", "Release Date"], file: "" }
+      { target: "MANTRAREV", headers: ["Doc ID", "Release Date"], file: "MANTRAREV" }
     ],
     rows: { sheet: "CDF", key: "C", headerRow: 1, startRow: 2, firstCol: "A", lastCol: "AH" },
     log: "UPDATE LOG", stuckDays: 14, targets: {}, exclude: ["A330-1-052 (another)"]
@@ -192,11 +192,36 @@
     }
     return -1;
   }
+  // the newest date in a sheet: the columns whose header says Date (not Due), up to today → serial or null
+  function newestDate(values, today) {
+    var rows = values || [], hr = -1;
+    for (var r = 0; r < Math.min(6, rows.length) && hr < 0; r++) if ((rows[r] || []).some(function (h) { return typeof h === "string" && /date/i.test(h); })) hr = r;
+    if (hr < 0) return null;
+    var cols = [];
+    rows[hr].forEach(function (h, i) { if (typeof h === "string" && /date/i.test(h) && !/due/i.test(h)) cols.push(i); });
+    var best = null, cap = today != null ? today + 1 : Infinity;
+    for (var i = hr + 1; i < rows.length; i++) for (var j = 0; j < cols.length; j++) {
+      var d = daySerial((rows[i] || [])[cols[j]]);
+      if (d != null && d > 20000 && d <= cap && (best == null || d > best)) best = d;
+    }
+    return best;
+  }
+  // UPDATE LOG → { sheet: "dd/mm/yyyy hh:mm" } — the last IMPORT of each sheet (the log is in time order)
+  function lastImports(log) {
+    var out = {};
+    (log || []).forEach(function (r, i) {
+      if (!i || !r || !/^import$/i.test(trim(r[1]))) return;
+      var sheet = trim(r[2]), t = trim(r[0]);
+      if (sheet && t) out[sheet.toUpperCase()] = t;
+    });
+    return out;
+  }
   function columnIndex(headers, name) { var n = norm(name); for (var i = 0; i < (headers || []).length; i++) if (norm(headers[i]) === n) return i; return -1; }
 
   return {
     str: str, trim: trim, isEmpty: isEmpty, col: col, letter: letter, norm: norm,
     serialOf: serialOf, dateOf: dateOf, daySerial: daySerial, ddmm: ddmm, ddmmyyyy: ddmmyyyy, weekStart: weekStart,
+    newestDate: newestDate, lastImports: lastImports,
     keyFull: keyFull, keyBase: keyBase, keyParts: keyParts, sameCdf: sameCdf, parseQuery: parseQuery, buildBlocks: buildBlocks,
     parseDelimited: parseDelimited, looseJson: looseJson, DEFAULT_RULES: DEFAULT_RULES, parseRules: parseRules,
     importFor: importFor, fileNameFor: fileNameFor, headerRow: headerRow, columnIndex: columnIndex
