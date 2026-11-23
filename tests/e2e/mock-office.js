@@ -358,6 +358,11 @@
     }
   });
 
+  Range.prototype.clear = function (what) {
+    var sh = this._sh;
+    if (/hyperlink/i.test(String(what)) && sh.links) delete sh.links[(this.rowIndex + 1) + ":" + this.columnIndex];
+    wb.calls.push("clear " + what + " " + (this.rowIndex + 1));
+  };
   function colIdx(s) { var n = 0; for (var i = 0; i < s.length; i++) n = n * 26 + s.charCodeAt(i) - 64; return n - 1; }
   function colName(i) { var n = i + 1, s = ""; while (n > 0) { var m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; }
 
@@ -467,7 +472,7 @@
     run: function (fn) { return Promise.resolve().then(function () { return fn(ctx); }); },
     WorksheetPositionType: { after: "After", end: "End", before: "Before", beginning: "Beginning" },
     ConditionalFormatType: { custom: "Custom" },
-    InsertShiftDirection: { down: "Down", right: "Right" }, DeleteShiftDirection: { up: "Up", left: "Left" }, RangeCopyType: { formats: "Formats", all: "All", values: "Values" }
+    InsertShiftDirection: { down: "Down", right: "Right" }, DeleteShiftDirection: { up: "Up", left: "Left" }, RangeCopyType: { formats: "Formats", all: "All", values: "Values" }, ClearApplyTo: { all: "All", formats: "Formats", contents: "Contents", hyperlinks: "Hyperlinks" }
   };
   window.Office = {
     HostType: { Excel: "Excel" },

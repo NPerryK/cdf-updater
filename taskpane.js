@@ -6,7 +6,7 @@
   var K = window.CdfCore, S = window.CdfStats, G = window.CdfCharts, D = window.CdfDash, R = window.CdfRows, N = window.CdfNotes, L = window.CdfLink, V = window.CdfSummary;
   var READ_BUDGET = 150000;
   var LS_RULES = "cdfUpdater.localRules.v2", THEME_KEY = "cdfUpdater.theme.v1", PRESENT_KEY = "cdfUpdater.present.v2";
-  var NS_LOOKS = "urn:cdf-updater:looks:v1", NS_TREND = "urn:cdf-updater:trend:v2", NS_STATIONS = "urn:cdf-updater:stations:v1", NS_NOTES = "urn:cdf-updater:mynotes:v1";
+  var NS_LOOKS = "urn:cdf-updater:looks:v1", NS_TREND = "urn:cdf-updater:trend:v2", NS_STATIONS = "urn:cdf-updater:stations:v1", NS_NOTES = "urn:cdf-updater:mynotes:v1", NS_IMPORTS = "urn:cdf-updater:imports:v1";
 
   var state = {
     inExcel: false, canImport: false, busy: false, page: "status",
@@ -170,7 +170,8 @@
     });
   }
   function loadStores() {
-    return Promise.all([readStore(NS_LOOKS), readStore(NS_TREND), readStore(NS_STATIONS), readStore(NS_NOTES)]).then(function (x) {
+    return Promise.all([readStore(NS_LOOKS), readStore(NS_TREND), readStore(NS_STATIONS), readStore(NS_NOTES), readStore(NS_IMPORTS)]).then(function (x) {
+      state.imported = (x[4] && x[4].map) || {};
       loadLooks(x[0]);
       state.trend = (x[1] && x[1].list) || [];
       state.stations = (x[2] && x[2].map) || {};
@@ -697,7 +698,7 @@
     if (!box) return;
     var d = state.data || {}, today = K.serialOf(new Date()), html = imports().map(function (imp) {
       var f = state.files.filter(function (x) { return x.target === imp.target; })[0], cur = d.all && d.all[imp.target], done = state.importDone[imp.target];
-      var when = (d.imported || {})[imp.target.toUpperCase()], newest = cur ? K.newestDate(cur, today) : null;
+      var when = (state.imported || {})[imp.target.toUpperCase()] || (d.imported || {})[imp.target.toUpperCase()], newest = cur ? K.newestDate(cur, today) : null;
       var upd = cur ? '<div class="s-upd" title="Replaced: the last time the add-in replaced it (UPDATE LOG). Data to: the newest date in its Date columns.">' + ([when ? "Replaced <b>" + esc(when) + "</b>" : "", newest != null ? (when ? "data" : "Data") + " to <b>" + esc(K.ddmmyyyy(newest)) + "</b>" : ""].filter(Boolean).join(" · ") || "No dates in it") + "</div>" : "";
       return '<div class="slot2' + (f ? " has" : "") + '" data-slot="' + esc(imp.target) + '" tabindex="0" role="button" aria-label="Drop or choose the file for sheet ' + esc(imp.target) + '"><div class="s-head"><b>' + esc(imp.target) + '</b><span class="s-now">' + (cur ? "in the workbook: " + Math.max(0, cur.length - 1) + " rows" : "not in the workbook yet — will be created") + "</span></div>" + upd +
         (f ? '<div class="s-file">' + esc(f.file.name) + (f.sheet ? " · sheet “" + esc(f.sheet) + "”" : "") + " · " + f.rows + " rows <button class=\"slot-clear\" type=\"button\" data-clear=\"" + esc(f.file.name) + '" title="Remove">✕</button></div><div class="s-why' + (f.weak ? " warn-text" : "") + '">Matched by ' + esc(f.why) + "</div>"
@@ -757,9 +758,11 @@
           function (e) { failed.push({ f: f, e: e }); });
       });
     }, Promise.resolve()).then(function () {
-      if (done.length) return Excel.run(function (ctx) {
-        return appendLog(ctx, done.map(function (f) { return [stamp(), "IMPORT", f.target, "", "", "", "", f.file.name, f.rows + " rows" + (f.sheet ? " (sheet " + f.sheet + ")" : "")]; }));
-      }).catch(function () { /* the log is a convenience */ });
+      // when each sheet was replaced: kept inside the workbook (no sheet for it)
+      if (!done.length) return;
+      state.imported = state.imported || {};
+      done.forEach(function (f) { state.imported[f.target.toUpperCase()] = stamp(); });
+      return writeStore(NS_IMPORTS, { map: state.imported }).catch(function () { /* shown for this session */ });
     }).then(function () {
       $("importMsg").innerHTML = (done.length ? '<div class="note ok">Replaced ✓ ' + done.map(function (f) { return esc(f.target); }).join(", ") + ".</div>" : "") +
         failed.map(function (x) { return '<div class="note bad">' + esc(x.f.target) + ": " + esc(errText(x.e)) + " — the sheet was left as it was.</div>"; }).join("");
@@ -849,6 +852,8 @@
       var b = it.mode !== "overwrite" ? insideBlock(sheet, +it.row, it.mode) : null;
       if (b) problems.push("Row " + (i + 1) + ": that place is inside the rows of " + b.key + " (merged cells) — insert above row " + (b.anchor + 1) + " or below row " + (b.rows[b.rows.length - 1] + 1));
       if (!it.cells.some(function (c) { return K.trim(c.value) !== ""; })) problems.push("Row " + (i + 1) + " has nothing to write");
+      if (it.link && !/^https?:\/\/\S+$/i.test(it.link)) problems.push("Row " + (i + 1) + ": the GCC link isn't a web link");
+      if (it.link && !R.keyOf(it.cells) && !K.trim((sheet[+it.row - 1] || [])[K.col("C")])) problems.push("Row " + (i + 1) + ": a GCC link needs a CDF number in C");
     });
     state.rowsPlan = problems.length ? null : pl;
     var head = '<div class="rows-why">' + esc(state.rowsLayout.why) + ". Empty cells in what you paste leave the sheet's cell as it is.</div>";
@@ -863,10 +868,13 @@
         '<div class="ri-ctl"><select class="inp small" data-mode="' + i + '"><option value="insert-below"' + (it.mode === "insert-below" ? " selected" : "") + '>Insert below row</option><option value="insert-above"' + (it.mode === "insert-above" ? " selected" : "") + '>Insert above row</option><option value="overwrite"' + (over ? " selected" : "") + '>Write over row</option></select>' +
         '<input class="inp small num" type="number" min="' + cfg.startRow + '" value="' + esc(it.row) + '" data-row="' + i + '" aria-label="Row number"></div>' +
         '<div class="ri-now">Row ' + r + " now: " + esc(R.rowSays(sheet, r)) + (it.why ? ' <span class="dim">· suggested: ' + esc(it.why) + "</span>" : "") + "</div>" +
+        '<label class="ri-link"><span>GCC link</span><input class="inp small" type="url" data-link="' + i + '" value="' + esc(it.link || "") + '" placeholder="Paste the link to this CDF in GCC" spellcheck="false" autocomplete="off"></label>' +
+        (it.link && !/^https?:\/\/\S+$/i.test(it.link) ? '<div class="ri-now warn-text">That isn\'t a web link (it should start with http:// or https://).</div>' : "") +
         (it.dropped ? '<div class="ri-now warn-text">' + it.dropped + " value" + (it.dropped === 1 ? "" : "s") + " fall outside " + esc(cfg.firstCol + ":" + cfg.lastCol) + " and are left out.</div>" : "") +
         '<details class="ri-cells"><summary>' + it.cells.filter(function (c) { return K.trim(c.value) !== ""; }).length + " cells" + (over ? " (old → new)" : "") + "</summary><table>" + cells + "</table></details></div>";
     }).join("") + (problems.length ? '<div class="note bad">' + problems.map(esc).join("<br>") + "</div>" : "");
     Array.prototype.forEach.call($("rowsPreview").querySelectorAll("[data-mode]"), function (s) { s.addEventListener("change", function () { items[+s.getAttribute("data-mode")].mode = s.value; items[+s.getAttribute("data-mode")].why = ""; renderRowsPreview(); }); });
+    Array.prototype.forEach.call($("rowsPreview").querySelectorAll("[data-link]"), function (s) { s.addEventListener("change", function () { items[+s.getAttribute("data-link")].link = K.trim(s.value); renderRowsPreview(); }); });
     Array.prototype.forEach.call($("rowsPreview").querySelectorAll("[data-row]"), function (s) { s.addEventListener("change", function () { items[+s.getAttribute("data-row")].row = Math.max(cfg.startRow, Math.floor(+s.value || cfg.startRow)); items[+s.getAttribute("data-row")].why = ""; renderRowsPreview(); }); });
     $("rowsWrite").textContent = "Write " + items.length + " row" + (items.length === 1 ? "" : "s") + " to sheet " + cfg.sheet;
     refreshButtons();
@@ -911,6 +919,16 @@
               log.push([stamp(), "ROW (insert)", cfg.sheet, String(pl.rows[o.items[j]]), R.keyOf(cells), "", "", cells.filter(function (c) { return K.trim(c.value) !== ""; }).length + " cells", ""]);
             });
           });
+          // 3. the GCC link on the CDF number (C) of each row that has one
+          undo.links = [];
+          pl.rows.forEach(function (r, i) {
+            var url = K.trim(items[i].link);
+            if (!url) return;
+            var rg = ws.getCell(r - 1, K.col("C")), key = R.keyOf(items[i].cells) || K.trim((sheet[+items[i].row - 1] || [])[K.col("C")]);
+            rg.hyperlink = { address: url, textToDisplay: key, screenTip: "Open " + key + " in GCC" };
+            if (items[i].mode === "overwrite") undo.links.push(r);
+            log.push([stamp(), "GCC LINK", cfg.sheet, String(r), key, "C", "", url, ""]);
+          });
           pl.rows.forEach(function (r, i) { if (items[i].mode !== "overwrite") undo.inserted.push(r); });
           undo.inserted.sort(function (a, b) { return b - a; });
           return ctx.sync();
@@ -933,6 +951,7 @@
     Excel.run(function (ctx) {
       var ws = ctx.workbook.worksheets.getItem(cfg.sheet);
       u.inserted.forEach(function (r) { ws.getRange(r + ":" + r).delete(Excel.DeleteShiftDirection.up); });
+      (u.links || []).forEach(function (r) { ws.getCell(r - 1, K.col("C")).clear(Excel.ClearApplyTo.hyperlinks); });
       u.overwritten.forEach(function (x) { ws.getCell(x.row - 1, x.col).formulas = [[x.old]]; });
       return ctx.sync().then(function () { return appendLog(ctx, [[stamp(), "UNDO ROWS", cfg.sheet, "", "", "", "", "", u.inserted.length + " rows removed, " + u.overwritten.length + " cells put back"]]).catch(function () { /* fine */ }); });
     }).then(function () { $("rowsUndoMsg").innerHTML = '<div class="note ok">Undone ✓</div>'; state.rowsUndo = null; $("rowsUndoInfo").textContent = "Nothing to undo."; },
@@ -940,16 +959,15 @@
       .then(function () { state.busy = false; clearStatus(); refreshButtons(); return refreshDash(); });
   }
   function goRow(sheet, r) { Excel.run(function (ctx) { var ws = ctx.workbook.worksheets.getItem(sheet); ws.activate(); ws.getRange("A" + r + ":AH" + r).select(); return ctx.sync(); }).catch(function () { /* fine */ }); }
-  // UPDATE LOG: one line per change
+  // UPDATE LOG: one line per change — only when the workbook already has that sheet; the add-in never adds it
   function appendLog(ctx, rows) {
     var name = (state.rules || K.DEFAULT_RULES).log;
     if (!name || !rows.length) return Promise.resolve();
     var sheets = ctx.workbook.worksheets, ws = sheets.getItemOrNullObject(name);
     ws.load("name");
     return ctx.sync().then(function () {
-      var fresh = ws.isNullObject;
-      if (fresh) ws = sheets.add(name);
-      var used = fresh ? null : ws.getUsedRangeOrNullObject(true);
+      if (ws.isNullObject) return null;
+      var fresh = false, used = ws.getUsedRangeOrNullObject(true);
       if (used) used.load("rowIndex,rowCount");
       return ctx.sync().then(function () {
         if (!fresh && !used.isNullObject) return used.rowIndex + used.rowCount;
@@ -959,6 +977,7 @@
         return 1;
       });
     }).then(function (startRow) {
+      if (startRow == null) return;
       var rg = ws.getRangeByIndexes(startRow, 0, rows.length, 9);
       rg.numberFormat = rows.map(function (r) { return r.map(function () { return "@"; }); });
       rg.values = rows;

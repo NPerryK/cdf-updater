@@ -948,13 +948,13 @@ td.rule, span.rule { color: var(--muted); font-size: 11px; white-space: nowrap; 
 /* the display on top (2.0) */
 .gl-nums { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
 .gl-nums .metric { position: relative; text-align: left; }
-.gl-nums .metric .v { display: block; font-family: var(--display); font-size: 26px; line-height: 1.05; color: var(--e-white); font-variant-numeric: tabular-nums; }
-.gl-nums .metric .v small { font-size: 14px; }
+.gl-nums .metric .v { display: block; font-family: var(--display); font-size: 21px; line-height: 1.05; color: var(--e-white); font-variant-numeric: tabular-nums; }
+.gl-nums .metric .v small { font-size: 12px; }
 .gl-nums .metric .v.amber { color: var(--e-amber); text-shadow: 0 0 10px rgba(255,180,32,.35); }
 .gl-nums .metric .v.green { color: var(--e-green); text-shadow: 0 0 10px rgba(69,212,131,.35); }
 .gl-nums .metric .v.cyan { color: var(--e-cyan); }
 .gl-nums .metric .k { display: block; font-size: 9.5px; letter-spacing: .07em; color: #8ea3b6; margin-top: 2px; }
-.gl-nums .metric .d { position: absolute; top: 1px; left: 52px; font-size: 10px; }
+.gl-nums .metric .d { position: absolute; top: 0; left: 44px; font-size: 9.5px; }
 .gl-nums .metric .d.up { color: var(--e-green); } .gl-nums .metric .d.down { color: var(--e-red); }
 .gl-bars { display: grid; gap: 4px; }
 .gb { display: grid; grid-template-columns: 92px 1fr 30px; gap: 8px; align-items: center; font-size: 10.5px; letter-spacing: .06em; color: #b9c8d6; }
@@ -1063,3 +1063,8 @@ td.rule, span.rule { color: var(--muted); font-size: 11px; white-space: nowrap; 
 .sv-foot { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
 .sv-foot span { font-size: 10.5px; padding: 2px 8px; border-radius: 10px; background: var(--ground); color: var(--muted); }
 .sv-foot b { color: var(--ink); }
+
+/* ROWS: the GCC link of a new row (2.3) */
+.ri-link { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.ri-link span { flex: none; font-size: 11px; color: var(--muted); }
+.ri-link input { flex: 1; min-width: 0; }
